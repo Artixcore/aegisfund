@@ -99,6 +99,42 @@ export async function decryptEnvelopeUtf8(envelope: CiphertextEnvelopeV1, shared
   return new TextDecoder().decode(plain);
 }
 
+/** AES-256-GCM using a pre-derived 32-byte key (e.g. session ephemeral mix). */
+export async function encryptUtf8EnvelopeFromRaw32(
+  plaintext: string,
+  rawKey32: Uint8Array,
+): Promise<CiphertextEnvelopeV1> {
+  if (rawKey32.length !== 32) throw new Error("Expected 32-byte AES key material");
+  const key = await crypto.subtle.importKey("raw", rawKey32 as BufferSource, { name: "AES-GCM" }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const combined = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, new TextEncoder().encode(plaintext)),
+  );
+  return { v: 1, iv: bytesToB64(iv), ciphertext: bytesToB64(combined) };
+}
+
+export async function decryptEnvelopeUtf8FromRaw32(
+  envelope: CiphertextEnvelopeV1,
+  rawKey32: Uint8Array,
+): Promise<string> {
+  if (rawKey32.length !== 32) throw new Error("Expected 32-byte AES key material");
+  const key = await crypto.subtle.importKey("raw", rawKey32 as BufferSource, { name: "AES-GCM" }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+  const iv = b64ToBytes(envelope.iv);
+  const combined = b64ToBytes(envelope.ciphertext);
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: iv as BufferSource },
+    key,
+    combined as BufferSource,
+  );
+  return new TextDecoder().decode(plain);
+}
+
 export async function signingPreimageHash(msg: Omit<P2pChatWireV1, "signatureB64">): Promise<Uint8Array> {
   const canon = [
     "aegis_p2p_v1",

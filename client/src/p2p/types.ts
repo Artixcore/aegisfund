@@ -1,7 +1,21 @@
-/** Wire frame on RTCDataChannel (JSON stringified). */
-export type P2pChannelFrame =
-  | { type: "chat"; payload: P2pChatWireV1 }
-  | { type: "ack"; messageId: string };
+/**
+ * Wire format versioning: bump `v` on breaking crypto or canonical signing changes.
+ * Clients must reject unknown major versions; optional fields may be ignored forward-compat.
+ */
+export const P2P_CHAT_WIRE_VERSION = 1 as const;
+
+/** Inner plaintext after decrypt: JSON string on the wire (legacy: raw UTF-8 text only). */
+export type P2pPlainPayload =
+  | { kind: "text"; text: string }
+  | {
+      kind: "file";
+      name: string;
+      mime: string;
+      size: number;
+      cid: string;
+      /** Symmetric key for file ciphertext, encrypted to peer (base64 AES-GCM sealed blob). */
+      fileKeyWrapB64: string;
+    };
 
 export type CiphertextEnvelopeV1 = {
   v: 1;
@@ -11,7 +25,7 @@ export type CiphertextEnvelopeV1 = {
 
 /** Signed + encrypted chat message on the wire. */
 export type P2pChatWireV1 = {
-  v: 1;
+  v: typeof P2P_CHAT_WIRE_VERSION;
   id: string;
   fromUserId: string;
   fromSigningPubB64: string;
@@ -21,6 +35,72 @@ export type P2pChatWireV1 = {
   envelope: CiphertextEnvelopeV1;
   signatureB64: string;
 };
+
+export type P2pHandshakeFrameV1 = {
+  type: "handshake";
+  v: 1;
+  role: "init" | "resp";
+  ephPubB64: string;
+};
+
+export type P2pTypingFrameV1 = { type: "typing"; v: 1; chat: "dm"; peerUserId: string; active: boolean };
+
+export type P2pSeenFrameV1 = { type: "seen"; v: 1; messageId: string };
+
+export type P2pEphemeralNoticeV1 = { type: "ephemeral"; v: 1; messageId: string; deleteAfterMs: number };
+
+/** Wire frame on RTCDataChannel (JSON stringified). */
+export type P2pChannelFrame =
+  | { type: "chat"; payload: P2pChatWireV1 }
+  | { type: "ack"; v: 1; messageId: string }
+  | { type: "delivered"; v: 1; messageId: string }
+  | P2pHandshakeFrameV1
+  | P2pTypingFrameV1
+  | P2pSeenFrameV1
+  | P2pEphemeralNoticeV1
+  | { type: "groupSignal"; v: 1; groupId: string; payloadB64: string };
+
+export function parseP2pChannelFrame(raw: unknown): P2pChannelFrame | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as { type?: string };
+  if (o.type === "chat" && "payload" in (raw as object)) {
+    const p = (raw as { payload: P2pChatWireV1 }).payload;
+    if (!p || typeof p !== "object" || p.v !== P2P_CHAT_WIRE_VERSION) return null;
+    return raw as P2pChannelFrame;
+  }
+  if (o.type === "ack" && typeof (raw as { messageId?: string }).messageId === "string") {
+    return { type: "ack", v: 1, messageId: (raw as { messageId: string }).messageId };
+  }
+  if (o.type === "delivered" && typeof (raw as { messageId?: string }).messageId === "string") {
+    return { type: "delivered", v: 1, messageId: (raw as { messageId: string }).messageId };
+  }
+  if (o.type === "handshake") {
+    const h = raw as P2pHandshakeFrameV1;
+    if (h.v !== 1 || (h.role !== "init" && h.role !== "resp") || typeof h.ephPubB64 !== "string") return null;
+    return h;
+  }
+  if (o.type === "typing") {
+    const t = raw as P2pTypingFrameV1;
+    if (t.v !== 1 || t.chat !== "dm" || typeof t.peerUserId !== "string" || typeof t.active !== "boolean") return null;
+    return t;
+  }
+  if (o.type === "seen") {
+    const s = raw as P2pSeenFrameV1;
+    if (s.v !== 1 || typeof s.messageId !== "string") return null;
+    return s;
+  }
+  if (o.type === "ephemeral") {
+    const e = raw as P2pEphemeralNoticeV1;
+    if (e.v !== 1 || typeof e.messageId !== "string" || typeof e.deleteAfterMs !== "number") return null;
+    return e;
+  }
+  if (o.type === "groupSignal") {
+    const g = raw as { type: "groupSignal"; v: number; groupId: string; payloadB64: string };
+    if (g.v !== 1 || typeof g.groupId !== "string" || typeof g.payloadB64 !== "string") return null;
+    return g;
+  }
+  return null;
+}
 
 /** Public invite payload (share via QR / paste). */
 export type P2pInviteV1 = {
@@ -53,14 +133,21 @@ export type P2pPeerRecord = {
   x25519PubB64: string;
   displayName?: string;
   addedAt: number;
+  /** When false, inbound chat is ignored until user enables chat for this contact. */
+  inboundChatEnabled?: boolean;
 };
 
 export type P2pStoredMessage = {
   id: string;
   peerId: string;
   direction: "in" | "out";
+  /** Serialized `P2pPlainPayload` JSON or legacy raw text. */
   plaintext: string;
   ts: number;
+  deliveredAt?: number;
+  seenAt?: number;
+  /** Local wall-clock expiry for ephemeral UI (best-effort). */
+  expiresAt?: number;
 };
 
 export type P2pOutboxRecord = {
@@ -70,3 +157,47 @@ export type P2pOutboxRecord = {
   createdAt: number;
   attempts: number;
 };
+
+/** --- Groups (local + relay fan-out) --- */
+
+export type P2pGroupRole = "admin" | "moderator" | "member";
+
+export type P2pGroupRecord = {
+  groupId: string;
+  name: string;
+  createdAt: number;
+  createdByUserId: string;
+  /** Symmetric group key (base64) — stored only locally; distribute wrapped copies to members. */
+  groupKeyB64: string;
+  keyVersion: number;
+  isPublic: boolean;
+};
+
+export type P2pGroupMemberRecord = {
+  groupId: string;
+  userId: string;
+  signingPubB64: string;
+  x25519PubB64: string;
+  role: P2pGroupRole;
+  addedAt: number;
+};
+
+export type P2pGroupStoredMessage = {
+  id: string;
+  groupId: string;
+  fromUserId: string;
+  direction: "in" | "out";
+  plaintext: string;
+  ts: number;
+};
+
+export type P2pGroupWirePayload =
+  | { kind: "text"; text: string }
+  | {
+      kind: "file";
+      name: string;
+      mime: string;
+      size: number;
+      cid: string;
+      fileKeyWrapB64: string;
+    };
