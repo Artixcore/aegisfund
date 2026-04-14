@@ -1,38 +1,76 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import {
+  applyInboundGroupInvite,
+  bumpOutboxAttempt,
+  buildOutgoingChat,
+  clearP2pStores,
+  createEphemeralX25519,
   createFullIdentity,
+  decryptGroupPayload,
+  decryptIncomingChat,
+  deleteGroup,
+  deleteGroupOutbox,
+  deleteOutbox,
   deletePeer,
+  deriveDmSessionMessageKeyMaterial,
+  encryptFileToBlob,
+  encryptGroupPayload,
+  exportIdentityEncrypted,
   getBlockedPeerIds,
+  getGroup,
   getIdentity,
+  getMutedPeerIds,
+  getP2pRtcConfiguration,
   getPeer,
   identityToInvite,
+  importIdentityEncrypted,
+  listGroupMembers,
+  listGroupMessages,
+  listGroupOutboxForGroup,
+  listGroups,
   listMessagesForPeer,
   listOutboxForPeer,
   listPeers,
   openP2pDb,
   parseInvite,
+  parseP2pChannelFrame,
+  patchMessage,
   peerRecordFromInvite,
+  P2pRelayClient,
+  putGroup,
+  putGroupMember,
+  putGroupMessage,
+  putGroupOutbox,
   putIdentity,
   putMessage,
   putOutbox,
   putPeer,
-  deleteOutbox,
+  randomGroupKeyB64,
+  ReplayGuard,
   setBlockedPeerIds,
+  setMutedPeerIds,
+  SlidingWindowRateLimiter,
+  unwrapIdentitySecrets,
+  uploadBlobToPinningApi,
+  wrapAesKeyForDmPeer,
+  wrapGroupKeyForPeer,
+  wrapIdentitySecrets,
   type P2pChannelFrame,
+  type P2pGroupRecord,
+  type P2pGroupStoredMessage,
+  type P2pHandshakeFrameV1,
   type P2pIdentityRecord,
   type P2pPeerRecord,
+  type P2pPlainPayload,
   P2pRtcSession,
-  ReplayGuard,
-  buildOutgoingChat,
-  decryptIncomingChat,
-  wrapIdentitySecrets,
-  unwrapIdentitySecrets,
+  parsePlaintextPayload,
 } from "@/p2p";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Copy,
+  Download,
   KeyRound,
   Link2,
   Loader2,
@@ -42,7 +80,9 @@ import {
   Send,
   Shield,
   Trash2,
+  Upload,
   UserPlus,
+  Users,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -64,6 +104,19 @@ function initials(name: string) {
 function isUnlocked(id: P2pIdentityRecord | null): id is P2pIdentityRecord {
   return !!id && !!id.signingSecretB64 && !!id.x25519SecretB64;
 }
+
+function displayPlaintextForUi(raw: string): string {
+  const p = parsePlaintextPayload(raw);
+  if (p.kind === "text") return p.text;
+  if (p.kind === "file") return `File: ${p.name} · ${p.cid.slice(0, 10)}…`;
+  if (p.kind === "groupInvite") return `Group invite: ${p.name}`;
+  return raw;
+}
+
+const RELAY_WS_URL = String(import.meta.env.VITE_P2P_RELAY_URL ?? "").trim();
+const RELAY_SECRET = String(import.meta.env.VITE_P2P_RELAY_SECRET ?? "").trim();
+const IPFS_UPLOAD_URL = String(import.meta.env.VITE_P2P_IPFS_UPLOAD_URL ?? "").trim();
+const IPFS_TOKEN = String(import.meta.env.VITE_P2P_IPFS_TOKEN ?? "").trim();
 
 export default function Messages() {
   const { user } = useAuth();
@@ -87,6 +140,24 @@ export default function Messages() {
   const rtcRef = useRef<P2pRtcSession | null>(null);
   const replayRef = useRef(new ReplayGuard());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const sessionKeyMaterialRef = useRef(new Map<string, Uint8Array>());
+  const pendingInitEphRef = useRef(new Map<string, { ephSecretB64: string; ephPubB64: string }>());
+  const relayRef = useRef<P2pRelayClient | null>(null);
+  const inboundLimiterRef = useRef(new SlidingWindowRateLimiter(120));
+  const outboundLimiterRef = useRef(new SlidingWindowRateLimiter(60));
+  const [muted, setMuted] = useState<Set<string>>(new Set());
+  const [panel, setPanel] = useState<"dm" | "groups">("dm");
+  const [relaySessionId, setRelaySessionId] = useState("");
+  const [groups, setGroups] = useState<P2pGroupRecord[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [groupMessages, setGroupMessages] = useState<P2pGroupStoredMessage[]>([]);
+  const [groupCompose, setGroupCompose] = useState("");
+  const [exportPw, setExportPw] = useState("");
+  const [importBundle, setImportBundle] = useState("");
+  const [importPw, setImportPw] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+  const [typingRemote, setTypingRemote] = useState(false);
+  const typingHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshPeers = useCallback(async (database: IDBDatabase) => {
     setPeers(await listPeers(database));
@@ -121,6 +192,8 @@ export default function Messages() {
         }
         setIdentity(id);
         await refreshPeers(database);
+        setMuted(await getMutedPeerIds(database));
+        setGroups(await listGroups(database));
       } catch (e) {
         console.error(e);
         toast.error("Could not open local P2P store");
@@ -162,6 +235,8 @@ export default function Messages() {
   const selectedPeer = peers.find((p) => p.peerId === selectedPeerId) ?? null;
 
   const closeRtc = () => {
+    sessionKeyMaterialRef.current.clear();
+    pendingInitEphRef.current.clear();
     rtcRef.current?.close();
     rtcRef.current = null;
     setRtcConn("new");
@@ -171,28 +246,118 @@ export default function Messages() {
     return () => closeRtc();
   }, []);
 
+  const utf8ToB64 = (s: string) => btoa(unescape(encodeURIComponent(s)));
+  const b64ToUtf8 = (s: string) => decodeURIComponent(escape(atob(s)));
+
+  const sendDmControl = (obj: object) => {
+    try {
+      rtcRef.current?.sendJson(obj);
+    } catch {
+      /* */
+    }
+  };
+
   const handleInboundFrame = async (text: string, peer: P2pPeerRecord) => {
     if (!db || !identity || !isUnlocked(identity)) return;
-    let frame: P2pChannelFrame;
+    let parsed: unknown;
     try {
-      frame = JSON.parse(text) as P2pChannelFrame;
+      parsed = JSON.parse(text) as unknown;
     } catch {
       return;
     }
-    if (frame.type !== "chat") return;
+    const frame = parseP2pChannelFrame(parsed);
+    if (!frame) return;
     if (blocked.has(peer.peerId)) return;
+
+    if (frame.type === "handshake") {
+      const h = frame as P2pHandshakeFrameV1;
+      if (h.role === "init") {
+        const ours = createEphemeralX25519();
+        const mat = await deriveDmSessionMessageKeyMaterial({
+          myLongTermSecretB64: identity.x25519SecretB64,
+          peerLongTermPubB64: peer.x25519PubB64,
+          myEphSecretB64: ours.ephSecretB64,
+          peerEphPubB64: h.ephPubB64,
+        });
+        sessionKeyMaterialRef.current.set(peer.peerId, mat);
+        sendDmControl({ type: "handshake", v: 1, role: "resp", ephPubB64: ours.ephPubB64 });
+        return;
+      }
+      if (h.role === "resp") {
+        const pending = pendingInitEphRef.current.get(peer.peerId);
+        if (!pending) return;
+        const mat = await deriveDmSessionMessageKeyMaterial({
+          myLongTermSecretB64: identity.x25519SecretB64,
+          peerLongTermPubB64: peer.x25519PubB64,
+          myEphSecretB64: pending.ephSecretB64,
+          peerEphPubB64: h.ephPubB64,
+        });
+        sessionKeyMaterialRef.current.set(peer.peerId, mat);
+        pendingInitEphRef.current.delete(peer.peerId);
+        return;
+      }
+    }
+
+    if (frame.type === "typing") {
+      if (frame.peerUserId !== peer.peerId) return;
+      setTypingRemote(frame.active);
+      if (typingHideTimerRef.current) clearTimeout(typingHideTimerRef.current);
+      if (frame.active) {
+        typingHideTimerRef.current = setTimeout(() => setTypingRemote(false), 2500);
+      }
+      return;
+    }
+
+    if (frame.type === "ack") {
+      await patchMessage(db, frame.messageId, { deliveredAt: Date.now() });
+      await refreshMessages(db, peer.peerId);
+      return;
+    }
+
+    if (frame.type === "delivered") {
+      await patchMessage(db, frame.messageId, { seenAt: Date.now() });
+      await refreshMessages(db, peer.peerId);
+      return;
+    }
+
+    if (frame.type === "ephemeral") {
+      await patchMessage(db, frame.messageId, { expiresAt: Date.now() + frame.deleteAfterMs });
+      await refreshMessages(db, peer.peerId);
+      return;
+    }
+
+    if (frame.type !== "chat") return;
+    if (muted.has(peer.peerId)) return;
+    if (peer.inboundChatEnabled === false) return;
+    if (!inboundLimiterRef.current.allow(peer.peerId)) return;
+
     const msg = frame.payload;
     const r = replayRef.current.checkAndRecord(msg.fromUserId, msg.id, msg.ts, msg.nonce);
     if (r !== "ok") return;
+    const sk = sessionKeyMaterialRef.current.get(peer.peerId);
     try {
-      const plain = await decryptIncomingChat(msg, identity, peer);
-      await putMessage(db, {
-        id: msg.id,
-        peerId: peer.peerId,
-        direction: "in",
-        plaintext: plain,
-        ts: msg.ts,
-      });
+      const inner = await decryptIncomingChat(msg, identity, peer, { sessionKeyMaterial32: sk ?? null });
+      const parsedInner = parsePlaintextPayload(inner);
+      if (parsedInner.kind === "groupInvite") {
+        await applyInboundGroupInvite(db, identity, peer, parsedInner);
+        await putMessage(db, {
+          id: msg.id,
+          peerId: peer.peerId,
+          direction: "in",
+          plaintext: inner,
+          ts: msg.ts,
+        });
+        setGroups(await listGroups(db));
+      } else {
+        await putMessage(db, {
+          id: msg.id,
+          peerId: peer.peerId,
+          direction: "in",
+          plaintext: inner,
+          ts: msg.ts,
+        });
+      }
+      sendDmControl({ type: "ack", v: 1, messageId: msg.id });
       await refreshMessages(db, peer.peerId);
     } catch (e) {
       console.warn("Decrypt failed", e);
@@ -207,10 +372,35 @@ export default function Messages() {
         session.sendJson(JSON.parse(row.frameJson) as object);
         await deleteOutbox(db, row.id);
       } catch {
+        await bumpOutboxAttempt(db, row.id);
         break;
       }
     }
     await refreshMessages(db, peerId);
+  };
+
+  const beginRtcSession = (isInitiator: boolean, peer: P2pPeerRecord, peerId: string) => {
+    const rtcCfg = getP2pRtcConfiguration();
+    return new P2pRtcSession({
+      isInitiator,
+      rtcConfig: rtcCfg,
+      onMessage: (t) => void handleInboundFrame(t, peer),
+      onChannelOpen: () => {
+        const s = rtcRef.current;
+        if (isInitiator && s) {
+          const eph = createEphemeralX25519();
+          pendingInitEphRef.current.set(peerId, eph);
+          try {
+            s.sendJson({ type: "handshake", v: 1, role: "init", ephPubB64: eph.ephPubB64 });
+          } catch {
+            /* */
+          }
+        }
+        if (s) void drainOutbox(s, peerId);
+        toast.success("P2P channel open");
+      },
+      onConnectionState: (s) => setRtcConn(s),
+    });
   };
 
   const startInitiator = async () => {
@@ -220,16 +410,7 @@ export default function Messages() {
     setOfferOut("");
     setAnswerIn("");
     try {
-      const session = new P2pRtcSession({
-        isInitiator: true,
-        onMessage: (t) => void handleInboundFrame(t, selectedPeer),
-        onChannelOpen: () => {
-          const s = rtcRef.current;
-          if (s) void drainOutbox(s, peerId);
-          toast.success("P2P channel open");
-        },
-        onConnectionState: (s) => setRtcConn(s),
-      });
+      const session = beginRtcSession(true, selectedPeer, peerId);
       rtcRef.current = session;
       const pkg = await session.createOfferPackage();
       setOfferOut(pkg);
@@ -264,16 +445,7 @@ export default function Messages() {
     closeRtc();
     setAnswerOut("");
     try {
-      const session = new P2pRtcSession({
-        isInitiator: false,
-        onMessage: (t) => void handleInboundFrame(t, selectedPeer),
-        onChannelOpen: () => {
-          const s = rtcRef.current;
-          if (s) void drainOutbox(s, peerId);
-          toast.success("P2P channel open");
-        },
-        onConnectionState: (s) => setRtcConn(s),
-      });
+      const session = beginRtcSession(false, selectedPeer, peerId);
       rtcRef.current = session;
       const ans = await session.acceptOffer(offerIn.trim());
       setAnswerOut(ans);
@@ -284,16 +456,80 @@ export default function Messages() {
     }
   };
 
+  const startInitiatorRelay = async () => {
+    if (!selectedPeer || !identity || !isUnlocked(identity) || !RELAY_WS_URL) return;
+    const peerId = selectedPeer.peerId;
+    const sid = relaySessionId.trim() || crypto.randomUUID();
+    setRelaySessionId(sid);
+    closeRtc();
+    try {
+      const relay = new P2pRelayClient(relayWsUrlToWs(RELAY_WS_URL));
+      await relay.connect({});
+      relay.joinRtcSession(sid, "init", identity.userId);
+      relayRef.current = relay;
+      const session = beginRtcSession(true, selectedPeer, peerId);
+      rtcRef.current = session;
+      const offer = await session.createOfferPackage();
+      relay.sendRtc(sid, offer);
+      const answer = await relay.waitRtcPayload(sid);
+      await session.completeWithAnswer(answer);
+      toast.success("Relay signaling complete");
+    } catch (e) {
+      console.error(e);
+      toast.error("Relay initiator failed (answerer must join same session id)");
+    }
+  };
+
+  const runAnswererRelay = async () => {
+    if (!selectedPeer || !identity || !isUnlocked(identity) || !RELAY_WS_URL) return;
+    const peerId = selectedPeer.peerId;
+    const sid = relaySessionId.trim();
+    if (!sid) {
+      toast.error("Paste relay session id from initiator");
+      return;
+    }
+    closeRtc();
+    try {
+      const relay = new P2pRelayClient(relayWsUrlToWs(RELAY_WS_URL));
+      await relay.connect({});
+      relay.joinRtcSession(sid, "ans", identity.userId);
+      relayRef.current = relay;
+      const offer = await relay.waitRtcPayload(sid);
+      const session = beginRtcSession(false, selectedPeer, peerId);
+      rtcRef.current = session;
+      const answer = await session.acceptOffer(offer);
+      relay.sendRtc(sid, answer);
+      toast.success("Relay signaling complete");
+    } catch (e) {
+      console.error(e);
+      toast.error("Relay answerer failed");
+    }
+  };
+
+  function relayWsUrlToWs(url: string) {
+    const u = url.trim();
+    if (u.startsWith("ws://") || u.startsWith("wss://")) return u;
+    if (u.startsWith("http://")) return `ws://${u.slice("http://".length)}`;
+    if (u.startsWith("https://")) return `wss://${u.slice("https://".length)}`;
+    return u;
+  }
+
   const handleSend = async () => {
     if (!compose.trim() || !db || !selectedPeer || !identity || !isUnlocked(identity)) return;
+    if (!outboundLimiterRef.current.allow(selectedPeer.peerId)) {
+      toast.error("Slow down — rate limit");
+      return;
+    }
     const text = compose.trim();
     try {
-      const wire = await buildOutgoingChat(identity, selectedPeer, text);
+      const sk = sessionKeyMaterialRef.current.get(selectedPeer.peerId);
+      const wire = await buildOutgoingChat(identity, selectedPeer, text, { sessionKeyMaterial32: sk ?? null });
       const frame: P2pChannelFrame = { type: "chat", payload: wire };
       const frameJson = JSON.stringify(frame);
       const session = rtcRef.current;
       if (session?.dc?.readyState === "open") {
         session.sendJson(frame);
+        session.sendJson({ type: "delivered", v: 1, messageId: wire.id });
       } else {
         await putOutbox(db, {
           id: crypto.randomUUID(),
@@ -302,13 +538,27 @@ export default function Messages() {
           createdAt: Date.now(),
           attempts: 0,
         });
-        toast.message("Queued — will send when P2P connects");
+        if (relayRef.current?.connected && RELAY_WS_URL) {
+          try {
+            relayRef.current.putMailbox(
+              selectedPeer.peerId,
+              utf8ToB64(frameJson),
+              3600,
+              RELAY_SECRET || undefined,
+            );
+            toast.message("Queued + mailbox drop (relay)");
+          } catch {
+            toast.message("Queued — will send when P2P connects");
+          }
+        } else {
+          toast.message("Queued — will send when P2P connects");
+        }
       }
       await putMessage(db, {
         id: wire.id,
         peerId: selectedPeer.peerId,
         direction: "out",
-        plaintext: text,
+        plaintext: JSON.stringify({ kind: "text", text } satisfies P2pPlainPayload),
         ts: wire.ts,
       });
       setCompose("");

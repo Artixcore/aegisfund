@@ -3,7 +3,6 @@
  * Run: `npm run relay` (set RELAY_PORT, optional RELAY_SHARED_SECRET for simple mailbox gating).
  */
 import { createServer } from "node:http";
-import { randomBytes } from "node:crypto";
 import { WebSocketServer, type WebSocket, type RawData } from "ws";
 
 const PORT = Number(process.env.RELAY_PORT ?? "3456");
@@ -21,7 +20,23 @@ type Client = {
   lastHits: number[];
 };
 
-const rtcRooms = new Map<string, { init?: WebSocket; ans?: WebSocket }>();
+type RtcRoom = {
+  init?: WebSocket;
+  ans?: WebSocket;
+  pendingToAns: string[];
+  pendingToInit: string[];
+};
+
+const rtcRooms = new Map<string, RtcRoom>();
+
+function ensureRtcRoom(sessionId: string): RtcRoom {
+  let r = rtcRooms.get(sessionId);
+  if (!r) {
+    r = { pendingToAns: [], pendingToInit: [] };
+    rtcRooms.set(sessionId, r);
+  }
+  return r;
+}
 const groupSubs = new Map<string, Set<WebSocket>>();
 const mailbox = new Map<string, { blobB64: string; exp: number }[]>();
 const clients = new Map<WebSocket, Client>();
@@ -78,25 +93,40 @@ wss.on("connection", (ws, req) => {
       if (!rateAllow(c2, 120)) return;
       const sessionId = m.sessionId;
       c2.rtcSessions.add(sessionId);
-      let room = rtcRooms.get(sessionId);
-      if (!room) {
-        room = {};
-        rtcRooms.set(sessionId, room);
-      }
+      const room = ensureRtcRoom(sessionId);
       if (m.role === "init") room.init = ws;
       else room.ans = ws;
+      const flush = (payloads: string[], target?: WebSocket) => {
+        if (!target || target.readyState !== target.OPEN) return;
+        for (const p of payloads) {
+          try {
+            target.send(JSON.stringify({ t: "rtc", sessionId, payload: p }));
+          } catch {
+            /* */
+          }
+        }
+        payloads.length = 0;
+      };
+      if (room.init && room.ans) {
+        flush(room.pendingToAns, room.ans);
+        flush(room.pendingToInit, room.init);
+      }
       return;
     }
     if (t === "rtc" && typeof m.sessionId === "string" && typeof m.payload === "string") {
       if (!rateAllow(c2, 600)) return;
       if (m.payload.length > MAX_PAYLOAD_CHARS) return;
-      const room = rtcRooms.get(m.sessionId);
-      if (!room) return;
+      const room = ensureRtcRoom(m.sessionId);
       const other = room.init === ws ? room.ans : room.init;
-      try {
-        other?.send(JSON.stringify({ t: "rtc", sessionId: m.sessionId, payload: m.payload }));
-      } catch {
-        /* */
+      if (other && other.readyState === other.OPEN) {
+        try {
+          other.send(JSON.stringify({ t: "rtc", sessionId: m.sessionId, payload: m.payload }));
+        } catch {
+          /* */
+        }
+      } else {
+        if (room.init === ws) room.pendingToAns.push(m.payload);
+        else if (room.ans === ws) room.pendingToInit.push(m.payload);
       }
       return;
     }
@@ -176,6 +206,10 @@ wss.on("connection", (ws, req) => {
       if (room.init === ws) delete room.init;
       if (room.ans === ws) delete room.ans;
       if (!room.init && !room.ans) rtcRooms.delete(sid);
+      else {
+        room.pendingToAns.length = 0;
+        room.pendingToInit.length = 0;
+      }
     }
     for (const gid of c3.groups) {
       const set = groupSubs.get(gid);

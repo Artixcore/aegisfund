@@ -9,9 +9,10 @@ import {
   verifyChatWire,
 } from "./crypto";
 import { b64ToBytes, bytesToB64 } from "./encoding";
-import { buildOutgoingChat, decryptIncomingChat } from "./message";
+import { buildOutgoingChat, decryptIncomingChat, parsePlaintextPayload } from "./message";
 import type { P2pPeerRecord } from "./types";
 import { ReplayGuard } from "./replay";
+import { createEphemeralX25519, deriveDmSessionMessageKeyMaterial } from "./sessionEphemeral";
 
 describe("p2p crypto", () => {
   it("derives matching shared secrets", async () => {
@@ -68,8 +69,10 @@ describe("p2p crypto", () => {
       addedAt: 1,
     };
     const wire = await buildOutgoingChat(alice, bobAsPeer, "secret text");
-    const plain = await decryptIncomingChat(wire, bob, aliceAsPeer);
-    expect(plain).toBe("secret text");
+    const inner = await decryptIncomingChat(wire, bob, aliceAsPeer);
+    const p = parsePlaintextPayload(inner);
+    expect(p.kind).toBe("text");
+    if (p.kind === "text") expect(p.text).toBe("secret text");
   });
 
   it("nonce helper returns 32 hex chars", () => {
@@ -90,5 +93,27 @@ describe("ReplayGuard", () => {
     const peer = "p1";
     expect(g.checkAndRecord(peer, "id1", Date.now(), "same")).toBe("ok");
     expect(g.checkAndRecord(peer, "id2", Date.now(), "same")).toBe("dup_nonce");
+  });
+});
+
+describe("session ephemeral mix", () => {
+  it("derives identical session key material for initiator and responder", async () => {
+    const a = await createFullIdentity();
+    const b = await createFullIdentity();
+    const initEph = createEphemeralX25519();
+    const respEph = createEphemeralX25519();
+    const mInit = await deriveDmSessionMessageKeyMaterial({
+      myLongTermSecretB64: a.x25519SecretB64,
+      peerLongTermPubB64: b.x25519PubB64,
+      myEphSecretB64: initEph.ephSecretB64,
+      peerEphPubB64: respEph.ephPubB64,
+    });
+    const mResp = await deriveDmSessionMessageKeyMaterial({
+      myLongTermSecretB64: b.x25519SecretB64,
+      peerLongTermPubB64: a.x25519PubB64,
+      myEphSecretB64: respEph.ephSecretB64,
+      peerEphPubB64: initEph.ephPubB64,
+    });
+    expect(mInit.length === mResp.length && mInit.every((v, i) => v === mResp[i]!)).toBe(true);
   });
 });

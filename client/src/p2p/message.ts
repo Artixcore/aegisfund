@@ -76,7 +76,11 @@ export async function decryptIncomingChat(
   if (!(await verifyChatWire(msg))) throw new Error("Invalid signature");
   if (msg.toUserId !== self.userId) throw new Error("Wrong recipient");
   if (opts?.sessionKeyMaterial32 && opts.sessionKeyMaterial32.length === 32) {
-    return decryptEnvelopeUtf8FromRaw32(msg.envelope, opts.sessionKeyMaterial32);
+    try {
+      return await decryptEnvelopeUtf8FromRaw32(msg.envelope, opts.sessionKeyMaterial32);
+    } catch {
+      /* older messages may still be wrapped with the long-term ECDH key */
+    }
   }
   const shared = await sharedSecretFromPair(self.x25519SecretB64, peer.x25519PubB64);
   return decryptEnvelopeUtf8(msg.envelope, shared);
