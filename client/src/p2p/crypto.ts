@@ -54,6 +54,7 @@ export function peerRecordFromInvite(inv: P2pInviteV1): P2pPeerRecord {
     x25519PubB64: inv.x25519PubB64,
     displayName: inv.displayName,
     addedAt: Date.now(),
+    inboundChatEnabled: true,
   };
 }
 

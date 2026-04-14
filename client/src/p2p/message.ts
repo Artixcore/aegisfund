@@ -25,9 +25,17 @@ export function parsePlaintextPayload(inner: string): P2pPlainPayload {
       o &&
       o.kind === "file" &&
       typeof (o as { cid?: string }).cid === "string" &&
-      typeof (o as { fileKeyWrapB64?: string }).fileKeyWrapB64 === "string"
+      typeof (o as { fileKeyWrapJson?: string }).fileKeyWrapJson === "string"
     ) {
       return o as Extract<P2pPlainPayload, { kind: "file" }>;
+    }
+    if (
+      o &&
+      o.kind === "groupInvite" &&
+      typeof (o as { groupId?: string }).groupId === "string" &&
+      typeof (o as { wrappedGroupKeyJson?: string }).wrappedGroupKeyJson === "string"
+    ) {
+      return o as Extract<P2pPlainPayload, { kind: "groupInvite" }>;
     }
   } catch {
     /* legacy */

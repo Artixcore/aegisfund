@@ -4,6 +4,8 @@
  */
 export const P2P_CHAT_WIRE_VERSION = 1 as const;
 
+export type P2pGroupRole = "admin" | "moderator" | "member";
+
 /** Inner plaintext after decrypt: JSON string on the wire (legacy: raw UTF-8 text only). */
 export type P2pPlainPayload =
   | { kind: "text"; text: string }
@@ -13,8 +15,16 @@ export type P2pPlainPayload =
       mime: string;
       size: number;
       cid: string;
-      /** Symmetric key for file ciphertext, encrypted to peer (base64 AES-GCM sealed blob). */
-      fileKeyWrapB64: string;
+      /** JSON.stringify(CiphertextEnvelopeV1) wrapped to the DM ECDH key. */
+      fileKeyWrapJson: string;
+    }
+  | {
+      kind: "groupInvite";
+      groupId: string;
+      name: string;
+      /** Output of `wrapGroupKeyForPeer` (JSON envelope string). */
+      wrappedGroupKeyJson: string;
+      role: P2pGroupRole;
     };
 
 export type CiphertextEnvelopeV1 = {
@@ -160,8 +170,6 @@ export type P2pOutboxRecord = {
 
 /** --- Groups (local + relay fan-out) --- */
 
-export type P2pGroupRole = "admin" | "moderator" | "member";
-
 export type P2pGroupRecord = {
   groupId: string;
   name: string;
@@ -189,6 +197,14 @@ export type P2pGroupStoredMessage = {
   direction: "in" | "out";
   plaintext: string;
   ts: number;
+};
+
+export type P2pGroupOutboxRecord = {
+  id: string;
+  groupId: string;
+  frameJson: string;
+  createdAt: number;
+  attempts: number;
 };
 
 export type P2pGroupWirePayload =
