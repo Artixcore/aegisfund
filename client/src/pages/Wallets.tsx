@@ -1,5 +1,7 @@
 import { trpc } from "@/lib/trpc";
+import LocalWalletPanel from "@/components/LocalWalletPanel";
 import SparklineChart from "@/components/SparklineChart";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -254,6 +256,7 @@ export default function Wallets() {
   const [showCreateAlert, setShowCreateAlert] = useState(false);
   const [addingWalletChain, setAddingWalletChain] = useState<string | null>(null);
   const [alertTab, setAlertTab] = useState<"active" | "history">("active");
+  const [walletTab, setWalletTab] = useState<"portfolio" | "local">("portfolio");
 
   const { data: prices, isLoading: pricesLoading, refetch: refetchPrices } = trpc.prices.getCryptoPrices.useQuery(undefined, {
     refetchInterval: 60_000,
@@ -342,6 +345,12 @@ export default function Wallets() {
 
   return (
     <div className="p-6 space-y-6 animate-fade-up">
+      <Tabs value={walletTab} onValueChange={(v) => setWalletTab(v as "portfolio" | "local")}>
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="portfolio">Portfolio</TabsTrigger>
+          <TabsTrigger value="local">Local wallet</TabsTrigger>
+        </TabsList>
+        <TabsContent value="portfolio" className="space-y-6 mt-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -734,6 +743,12 @@ export default function Wallets() {
           </table>
         </div>
       </div>
+
+        </TabsContent>
+        <TabsContent value="local" className="mt-4">
+          <LocalWalletPanel />
+        </TabsContent>
+      </Tabs>
 
       {/* Edit Address Modal */}
       {editingChain && editingWallet && (

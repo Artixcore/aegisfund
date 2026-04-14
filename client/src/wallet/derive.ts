@@ -5,8 +5,8 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { mnemonicToAccount } from "viem/accounts";
 import type { BtcNetworkId, WalletSettings } from "./types";
 
-export function ethDerivationPath(accountIndex: number): string {
-  return `m/44'/60'/0'/0/${accountIndex}`;
+export function ethDerivationPath(accountIndex: number): `m/44'/60'/0'/0/${number}` {
+  return `m/44'/60'/0'/0/${accountIndex}` as `m/44'/60'/0'/0/${number}`;
 }
 
 export function btcDerivationPath(accountIndex: number, btcNetwork: BtcNetworkId): string {
@@ -15,7 +15,7 @@ export function btcDerivationPath(accountIndex: number, btcNetwork: BtcNetworkId
 }
 
 export function getEthAccount(mnemonic: string, accountIndex: number) {
-  return mnemonicToAccount({ mnemonic, path: ethDerivationPath(accountIndex) });
+  return mnemonicToAccount(mnemonic, { path: ethDerivationPath(accountIndex) });
 }
 
 export function getBtcAddress(mnemonic: string, accountIndex: number, btcNetwork: BtcNetworkId): string {

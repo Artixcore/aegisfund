@@ -59,6 +59,21 @@ export type P2pSeenFrameV1 = { type: "seen"; v: 1; messageId: string };
 
 export type P2pEphemeralNoticeV1 = { type: "ephemeral"; v: 1; messageId: string; deleteAfterMs: number };
 
+/** On-chain addresses shared out-of-band (not encrypted chat). */
+export type WalletInfoV1 = {
+  v: 1;
+  type: "wallet_info";
+  chains: Partial<{ ethereum: string; bitcoin: string }>;
+  displayName?: string;
+};
+
+export type P2pPaymentAckV1 = {
+  v: 1;
+  type: "payment_ack";
+  chain: "ethereum" | "bitcoin";
+  txHash: string;
+};
+
 /** Wire frame on RTCDataChannel (JSON stringified). */
 export type P2pChannelFrame =
   | { type: "chat"; payload: P2pChatWireV1 }
@@ -68,7 +83,9 @@ export type P2pChannelFrame =
   | P2pTypingFrameV1
   | P2pSeenFrameV1
   | P2pEphemeralNoticeV1
-  | { type: "groupSignal"; v: 1; groupId: string; payloadB64: string };
+  | { type: "groupSignal"; v: 1; groupId: string; payloadB64: string }
+  | { type: "wallet_info"; payload: WalletInfoV1 }
+  | { type: "payment_ack"; payload: P2pPaymentAckV1 };
 
 export function parseP2pChannelFrame(raw: unknown): P2pChannelFrame | null {
   if (!raw || typeof raw !== "object") return null;
@@ -107,7 +124,19 @@ export function parseP2pChannelFrame(raw: unknown): P2pChannelFrame | null {
   if (o.type === "groupSignal") {
     const g = raw as { type: "groupSignal"; v: number; groupId: string; payloadB64: string };
     if (g.v !== 1 || typeof g.groupId !== "string" || typeof g.payloadB64 !== "string") return null;
-    return g;
+    return { type: "groupSignal" as const, v: 1 as const, groupId: g.groupId, payloadB64: g.payloadB64 };
+  }
+  if (o.type === "wallet_info") {
+    const w = raw as { payload?: WalletInfoV1 };
+    const p = w.payload;
+    if (!p || p.v !== 1 || p.type !== "wallet_info" || typeof p.chains !== "object" || p.chains === null) return null;
+    return raw as P2pChannelFrame;
+  }
+  if (o.type === "payment_ack") {
+    const p = (raw as { payload?: P2pPaymentAckV1 }).payload;
+    if (!p || p.v !== 1 || p.type !== "payment_ack" || (p.chain !== "ethereum" && p.chain !== "bitcoin") || typeof p.txHash !== "string")
+      return null;
+    return raw as P2pChannelFrame;
   }
   return null;
 }
@@ -145,19 +174,25 @@ export type P2pPeerRecord = {
   addedAt: number;
   /** When false, inbound chat is ignored until user enables chat for this contact. */
   inboundChatEnabled?: boolean;
+  /** Last known addresses from peer `wallet_info` frames. */
+  chainAddresses?: Partial<{ ethereum: string; bitcoin: string }>;
 };
 
 export type P2pStoredMessage = {
   id: string;
   peerId: string;
   direction: "in" | "out";
-  /** Serialized `P2pPlainPayload` JSON or legacy raw text. */
+  /** Serialized `P2pPlainPayload` JSON or legacy raw text; summary for wallet rows. */
   plaintext: string;
   ts: number;
   deliveredAt?: number;
   seenAt?: number;
   /** Local wall-clock expiry for ephemeral UI (best-effort). */
   expiresAt?: number;
+  /** Structured DM rows (not encrypted plaintext). */
+  narrativeKind?: "wallet_info" | "payment_ack";
+  walletInfoPayload?: WalletInfoV1;
+  paymentAckPayload?: { chain: "ethereum" | "bitcoin"; txHash: string };
 };
 
 export type P2pOutboxRecord = {
@@ -207,13 +242,10 @@ export type P2pGroupOutboxRecord = {
   attempts: number;
 };
 
-export type P2pGroupWirePayload =
-  | { kind: "text"; text: string }
-  | {
-      kind: "file";
-      name: string;
-      mime: string;
-      size: number;
-      cid: string;
-      fileKeyWrapB64: string;
-    };
+export type P2pGroupWirePayload = {
+  kind: "text";
+  text: string;
+  fromUserId: string;
+  id: string;
+  ts: number;
+};

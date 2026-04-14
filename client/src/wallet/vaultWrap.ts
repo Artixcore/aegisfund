@@ -22,7 +22,9 @@ export async function wrapMnemonic(mnemonic: string, passphrase: string): Promis
   );
   const aesKey = await crypto.subtle.importKey("raw", aesRaw, { name: "AES-GCM" }, false, ["encrypt"]);
   const plaintext = payloadFromMnemonic(mnemonic);
-  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource }, aesKey, plaintext));
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource }, aesKey, plaintext as BufferSource),
+  );
   return {
     saltB64: bytesToB64(salt),
     iv: bytesToB64(iv),
@@ -44,7 +46,7 @@ export async function unwrapMnemonic(wrapped: { saltB64: string; iv: string; cip
   const plainBuf = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: ivBytes as BufferSource },
     aesKey,
-    b64ToBytes(wrapped.ciphertext) as BufferSource,
+    b64ToBytes(wrapped.ciphertext) as unknown as BufferSource,
   );
   const parsed = JSON.parse(new TextDecoder().decode(plainBuf)) as { mnemonic: string };
   if (typeof parsed.mnemonic !== "string") throw new Error("Invalid vault payload");

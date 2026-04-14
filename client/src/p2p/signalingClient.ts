@@ -130,7 +130,7 @@ export class P2pRelayClient {
   }
 
   close() {
-    for (const arr of this.rtcWaiters.values()) {
+    for (const arr of Array.from(this.rtcWaiters.values())) {
       for (const w of arr) {
         clearTimeout(w.timer);
         w.reject(new Error("relay closed"));

@@ -1,5 +1,5 @@
-import { createPublicClient, createWalletClient, http, parseEther, formatEther, type PublicClient } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
+import { formatEther, parseEther } from "viem/utils";
 import type { ChainAdapter, ChainBalanceResult, NativeSendParams, NativeSendResult, WalletSettings } from "./types";
 import { chainFromEthNetwork } from "./chains";
 import { ethDerivationPath } from "./derive";
@@ -17,23 +17,18 @@ export async function ethJsonRpc<T>(url: string, method: string, params: unknown
   return body.result as T;
 }
 
-function publicClientFor(settings: WalletSettings): PublicClient {
-  const chain = chainFromEthNetwork(settings.ethNetwork);
-  return createPublicClient({ chain, transport: http(settings.ethRpcUrl.trim()) });
-}
-
 export const ethereumAdapter: ChainAdapter = {
   id: "ethereum",
 
   async getReceiveAddress(mnemonic, accountIndex) {
-    const acc = mnemonicToAccount({ mnemonic, path: ethDerivationPath(accountIndex) });
+    const acc = mnemonicToAccount(mnemonic, { path: ethDerivationPath(accountIndex) });
     return acc.address;
   },
 
   async getBalance(mnemonic, accountIndex, settings) {
     const url = settings.ethRpcUrl.trim();
     if (!url) throw new Error("Set an Ethereum JSON-RPC URL (must allow browser CORS).");
-    const acc = mnemonicToAccount({ mnemonic, path: ethDerivationPath(accountIndex) });
+    const acc = mnemonicToAccount(mnemonic, { path: ethDerivationPath(accountIndex) });
     const hex = await ethJsonRpc<string>(url, "eth_getBalance", [acc.address, "latest"]);
     const wei = BigInt(hex);
     return {
@@ -45,11 +40,13 @@ export const ethereumAdapter: ChainAdapter = {
   async estimateNativeSendFee(mnemonic, accountIndex, settings, to, amountEthDecimal) {
     const url = settings.ethRpcUrl.trim();
     if (!url) throw new Error("Set an Ethereum JSON-RPC URL.");
-    const chain = chainFromEthNetwork(settings.ethNetwork);
-    const account = mnemonicToAccount({ mnemonic, path: ethDerivationPath(accountIndex) });
-    const pc = publicClientFor(settings);
-    const value = parseEther(amountEthDecimal);
-    const gas = await pc.estimateGas({ account, to: to as `0x${string}`, value });
+    const acc = mnemonicToAccount(mnemonic, { path: ethDerivationPath(accountIndex) });
+    const valueWei = parseEther(amountEthDecimal);
+    const from = acc.address;
+    const gasHex = await ethJsonRpc<string>(url, "eth_estimateGas", [
+      { from, to, value: `0x${valueWei.toString(16)}` },
+    ]);
+    const gas = BigInt(gasHex);
     let maxFeePerGas: bigint;
     try {
       const block = await ethJsonRpc<{ baseFeePerGas?: string } | null>(url, "eth_getBlockByNumber", ["latest", false]);
@@ -58,11 +55,11 @@ export const ethereumAdapter: ChainAdapter = {
       try {
         priority = BigInt(await ethJsonRpc<string>(url, "eth_maxPriorityFeePerGas", []));
       } catch {
-        /* legacy chain */
+        /* legacy */
       }
-      maxFeePerGas = base === 0n ? (await pc.getGasPrice()) : base * 2n + priority;
+      maxFeePerGas = base === 0n ? BigInt(await ethJsonRpc<string>(url, "eth_gasPrice", [])) : base * 2n + priority;
     } catch {
-      maxFeePerGas = await pc.getGasPrice();
+      maxFeePerGas = BigInt(await ethJsonRpc<string>(url, "eth_gasPrice", []));
     }
     const wei = gas * maxFeePerGas;
     return { wei, display: `~${formatEther(wei)} ETH fee` };
@@ -74,17 +71,52 @@ export const ethereumAdapter: ChainAdapter = {
     if (!url) throw new Error("Missing ETH RPC URL.");
     if (!amountEthDecimal) throw new Error("Missing amount.");
     const chain = chainFromEthNetwork(ethNetwork);
-    const account = mnemonicToAccount({ mnemonic, path: ethDerivationPath(accountIndex) });
-    const walletClient = createWalletClient({
-      account,
-      chain,
-      transport: http(url),
-    });
-    const hash = await walletClient.sendTransaction({
-      to: to as `0x${string}`,
-      value: parseEther(amountEthDecimal),
-      chain,
-    });
+    const account = mnemonicToAccount(mnemonic, { path: ethDerivationPath(accountIndex) });
+    const from = account.address;
+    const valueWei = parseEther(amountEthDecimal);
+    const nonceHex = await ethJsonRpc<string>(url, "eth_getTransactionCount", [from, "latest"]);
+    const nonce = BigInt(nonceHex);
+    const gasHex = await ethJsonRpc<string>(url, "eth_estimateGas", [
+      { from, to, value: `0x${valueWei.toString(16)}` },
+    ]);
+    const gas = BigInt(gasHex);
+
+    let rawSigned: `0x${string}`;
+    const block = await ethJsonRpc<{ baseFeePerGas?: string } | null>(url, "eth_getBlockByNumber", ["latest", false]);
+    const baseFee = block?.baseFeePerGas ? BigInt(block.baseFeePerGas) : 0n;
+
+    if (baseFee > 0n) {
+      let maxPriorityFeePerGas = 1_000_000_000n;
+      try {
+        maxPriorityFeePerGas = BigInt(await ethJsonRpc<string>(url, "eth_maxPriorityFeePerGas", []));
+      } catch {
+        /* use default */
+      }
+      const maxFeePerGas = baseFee * 2n + maxPriorityFeePerGas;
+      rawSigned = await account.signTransaction({
+        type: "eip1559",
+        chainId: chain.id,
+        nonce: Number(nonce),
+        to: to as `0x${string}`,
+        value: valueWei,
+        gas,
+        maxFeePerGas,
+        maxPriorityFeePerGas,
+      });
+    } else {
+      const gasPrice = BigInt(await ethJsonRpc<string>(url, "eth_gasPrice", []));
+      rawSigned = await account.signTransaction({
+        type: "legacy",
+        chainId: chain.id,
+        nonce: Number(nonce),
+        to: to as `0x${string}`,
+        value: valueWei,
+        gas,
+        gasPrice,
+      });
+    }
+
+    const hash = await ethJsonRpc<string>(url, "eth_sendRawTransaction", [rawSigned]);
     return { txHash: hash, chain: "ethereum" };
   },
 };

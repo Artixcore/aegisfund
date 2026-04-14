@@ -8,8 +8,6 @@ import {
   createFullIdentity,
   decryptGroupPayload,
   decryptIncomingChat,
-  deleteGroup,
-  deleteGroupOutbox,
   deleteOutbox,
   deletePeer,
   deriveDmSessionMessageKeyMaterial,
@@ -24,9 +22,7 @@ import {
   getPeer,
   identityToInvite,
   importIdentityEncrypted,
-  listGroupMembers,
   listGroupMessages,
-  listGroupOutboxForGroup,
   listGroups,
   listMessagesForPeer,
   listOutboxForPeer,
@@ -40,7 +36,6 @@ import {
   putGroup,
   putGroupMember,
   putGroupMessage,
-  putGroupOutbox,
   putIdentity,
   putMessage,
   putOutbox,
@@ -59,12 +54,17 @@ import {
   type P2pGroupRecord,
   type P2pGroupStoredMessage,
   type P2pHandshakeFrameV1,
+  type P2pIdentityExportV1,
   type P2pIdentityRecord,
   type P2pPeerRecord,
   type P2pPlainPayload,
+  type P2pStoredMessage,
   P2pRtcSession,
   parsePlaintextPayload,
+  type WalletInfoV1,
 } from "@/p2p";
+import { addressesForSettings, getWalletSettings, openChainWalletDb, walletSessionGetMnemonic } from "@/wallet";
+import { isAddress } from "viem/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -83,6 +83,7 @@ import {
   Upload,
   UserPlus,
   Users,
+  Wallet,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -111,6 +112,43 @@ function displayPlaintextForUi(raw: string): string {
   if (p.kind === "file") return `File: ${p.name} · ${p.cid.slice(0, 10)}…`;
   if (p.kind === "groupInvite") return `Group invite: ${p.name}`;
   return raw;
+}
+
+function btcAddrLooksValid(s: string): boolean {
+  return /^(bc1|tb1)[a-z0-9]{8,90}$/i.test(s.trim());
+}
+
+function DmMessageBody({ msg }: { msg: P2pStoredMessage }) {
+  if (msg.narrativeKind === "wallet_info" && msg.walletInfoPayload) {
+    const w = msg.walletInfoPayload;
+    return (
+      <div className="space-y-2 text-[11px] font-mono">
+        <div className="text-muted-foreground uppercase tracking-wide">Wallet addresses</div>
+        {w.chains.ethereum && (
+          <div className="break-all">
+            <span className="text-muted-foreground">ETH </span>
+            {w.chains.ethereum}
+          </div>
+        )}
+        {w.chains.bitcoin && (
+          <div className="break-all">
+            <span className="text-muted-foreground">BTC </span>
+            {w.chains.bitcoin}
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (msg.narrativeKind === "payment_ack" && msg.paymentAckPayload) {
+    const p = msg.paymentAckPayload;
+    return (
+      <div className="text-[11px] font-mono space-y-1">
+        <div className="text-muted-foreground">Payment ({p.chain})</div>
+        <div className="break-all">{p.txHash}</div>
+      </div>
+    );
+  }
+  return <>{displayPlaintextForUi(msg.plaintext)}</>;
 }
 
 const RELAY_WS_URL = String(import.meta.env.VITE_P2P_RELAY_URL ?? "").trim();
@@ -158,6 +196,7 @@ export default function Messages() {
   const [newGroupName, setNewGroupName] = useState("");
   const [typingRemote, setTypingRemote] = useState(false);
   const typingHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refreshPeers = useCallback(async (database: IDBDatabase) => {
     setPeers(await listPeers(database));
@@ -208,6 +247,16 @@ export default function Messages() {
     if (!db || !selectedPeerId) return;
     void refreshMessages(db, selectedPeerId);
   }, [db, selectedPeerId, refreshMessages]);
+
+  useEffect(() => {
+    if (!db || !selectedGroupId) {
+      setGroupMessages([]);
+      return;
+    }
+    void (async () => {
+      setGroupMessages(await listGroupMessages(db, selectedGroupId));
+    })();
+  }, [db, selectedGroupId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -322,6 +371,42 @@ export default function Messages() {
 
     if (frame.type === "ephemeral") {
       await patchMessage(db, frame.messageId, { expiresAt: Date.now() + frame.deleteAfterMs });
+      await refreshMessages(db, peer.peerId);
+      return;
+    }
+
+    if (frame.type === "wallet_info") {
+      const w = frame.payload;
+      const next: Partial<{ ethereum: string; bitcoin: string }> = { ...peer.chainAddresses };
+      if (w.chains.ethereum && isAddress(w.chains.ethereum)) next.ethereum = w.chains.ethereum;
+      if (w.chains.bitcoin && btcAddrLooksValid(w.chains.bitcoin)) next.bitcoin = w.chains.bitcoin;
+      await putPeer(db, { ...peer, chainAddresses: next });
+      const id = crypto.randomUUID();
+      await putMessage(db, {
+        id,
+        peerId: peer.peerId,
+        direction: "in",
+        ts: Date.now(),
+        plaintext: "Wallet addresses (structured)",
+        narrativeKind: "wallet_info",
+        walletInfoPayload: w,
+      });
+      await refreshPeers(db);
+      await refreshMessages(db, peer.peerId);
+      return;
+    }
+
+    if (frame.type === "payment_ack") {
+      const p = frame.payload;
+      await putMessage(db, {
+        id: crypto.randomUUID(),
+        peerId: peer.peerId,
+        direction: "in",
+        ts: Date.now(),
+        plaintext: `Payment ${p.chain}: ${p.txHash}`,
+        narrativeKind: "payment_ack",
+        paymentAckPayload: { chain: p.chain, txHash: p.txHash },
+      });
       await refreshMessages(db, peer.peerId);
       return;
     }
@@ -456,6 +541,80 @@ export default function Messages() {
     }
   };
 
+  function relayWsUrlToWs(url: string) {
+    const u = url.trim();
+    if (u.startsWith("ws://") || u.startsWith("wss://")) return u;
+    if (u.startsWith("http://")) return `ws://${u.slice("http://".length)}`;
+    if (u.startsWith("https://")) return `wss://${u.slice("https://".length)}`;
+    return u;
+  }
+
+  const onRelayGroupPayload = async (groupId: string, payloadB64: string) => {
+    if (!db || !identity) return;
+    const g = await getGroup(db, groupId);
+    if (!g) return;
+    try {
+      const sealedJson = b64ToUtf8(payloadB64);
+      const inner = await decryptGroupPayload(g.groupKeyB64, sealedJson);
+      if (inner.kind !== "text") return;
+      if (inner.fromUserId === identity.userId) return;
+      await putGroupMessage(db, {
+        id: inner.id,
+        groupId,
+        fromUserId: inner.fromUserId,
+        direction: "in",
+        plaintext: JSON.stringify({ kind: "text", text: inner.text }),
+        ts: inner.ts,
+      });
+      if (selectedGroupId === groupId) {
+        setGroupMessages(await listGroupMessages(db, groupId));
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const onRelayMailboxBlob = async (blobB64: string) => {
+    if (!db || !identity || !isUnlocked(identity)) return;
+    try {
+      const frameJson = b64ToUtf8(blobB64);
+      const frame = parseP2pChannelFrame(JSON.parse(frameJson));
+      if (!frame || frame.type !== "chat") return;
+      const msg = frame.payload;
+      const peer = await getPeer(db, msg.fromUserId);
+      if (!peer) return;
+      await handleInboundFrame(frameJson, peer);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const ensureRelay = async () => {
+    if (!RELAY_WS_URL) throw new Error("Set VITE_P2P_RELAY_URL");
+    if (relayRef.current?.connected) return relayRef.current;
+    relayRef.current?.close();
+    const relay = new P2pRelayClient(relayWsUrlToWs(RELAY_WS_URL));
+    await relay.connect({
+      onGroup: (gid, b64) => void onRelayGroupPayload(gid, b64),
+      onMailbox: (b64) => void onRelayMailboxBlob(b64),
+    });
+    relayRef.current = relay;
+    const gs = db ? await listGroups(db) : [];
+    for (const g of gs) relay.joinGroup(g.groupId);
+    if (identity?.userId) relay.fetchMailbox(identity.userId, RELAY_SECRET || undefined);
+    return relay;
+  };
+
+  const handleRelayConnect = async () => {
+    try {
+      await ensureRelay();
+      toast.success("Relay connected");
+    } catch (e) {
+      console.error(e);
+      toast.error("Relay connect failed");
+    }
+  };
+
   const startInitiatorRelay = async () => {
     if (!selectedPeer || !identity || !isUnlocked(identity) || !RELAY_WS_URL) return;
     const peerId = selectedPeer.peerId;
@@ -463,10 +622,8 @@ export default function Messages() {
     setRelaySessionId(sid);
     closeRtc();
     try {
-      const relay = new P2pRelayClient(relayWsUrlToWs(RELAY_WS_URL));
-      await relay.connect({});
+      const relay = await ensureRelay();
       relay.joinRtcSession(sid, "init", identity.userId);
-      relayRef.current = relay;
       const session = beginRtcSession(true, selectedPeer, peerId);
       rtcRef.current = session;
       const offer = await session.createOfferPackage();
@@ -490,10 +647,8 @@ export default function Messages() {
     }
     closeRtc();
     try {
-      const relay = new P2pRelayClient(relayWsUrlToWs(RELAY_WS_URL));
-      await relay.connect({});
+      const relay = await ensureRelay();
       relay.joinRtcSession(sid, "ans", identity.userId);
-      relayRef.current = relay;
       const offer = await relay.waitRtcPayload(sid);
       const session = beginRtcSession(false, selectedPeer, peerId);
       rtcRef.current = session;
@@ -506,13 +661,211 @@ export default function Messages() {
     }
   };
 
-  function relayWsUrlToWs(url: string) {
-    const u = url.trim();
-    if (u.startsWith("ws://") || u.startsWith("wss://")) return u;
-    if (u.startsWith("http://")) return `ws://${u.slice("http://".length)}`;
-    if (u.startsWith("https://")) return `wss://${u.slice("https://".length)}`;
-    return u;
-  }
+  const handleCreateGroup = async () => {
+    if (!db || !identity || !isUnlocked(identity) || !newGroupName.trim()) return;
+    const groupId = crypto.randomUUID();
+    const groupKeyB64 = randomGroupKeyB64();
+    await putGroup(db, {
+      groupId,
+      name: newGroupName.trim(),
+      createdAt: Date.now(),
+      createdByUserId: identity.userId,
+      groupKeyB64,
+      keyVersion: 1,
+      isPublic: false,
+    });
+    await putGroupMember(db, {
+      groupId,
+      userId: identity.userId,
+      signingPubB64: identity.signingPubB64,
+      x25519PubB64: identity.x25519PubB64,
+      role: "admin",
+      addedAt: Date.now(),
+    });
+    for (const p of peers) {
+      if (p.peerId === identity.userId) continue;
+      await putGroupMember(db, {
+        groupId,
+        userId: p.peerId,
+        signingPubB64: p.signingPubB64,
+        x25519PubB64: p.x25519PubB64,
+        role: "member",
+        addedAt: Date.now(),
+      });
+      const wrap = await wrapGroupKeyForPeer({
+        groupKeyB64,
+        myX25519SecretB64: identity.x25519SecretB64,
+        peerX25519PubB64: p.x25519PubB64,
+      });
+      const invite: P2pPlainPayload = {
+        kind: "groupInvite",
+        groupId,
+        name: newGroupName.trim(),
+        wrappedGroupKeyJson: wrap,
+        role: "member",
+      };
+      const sk = sessionKeyMaterialRef.current.get(p.peerId);
+      const wire = await buildOutgoingChat(identity, p, invite, { sessionKeyMaterial32: sk ?? null });
+      const frame: P2pChannelFrame = { type: "chat", payload: wire };
+      const frameJson = JSON.stringify(frame);
+      await putOutbox(db, {
+        id: crypto.randomUUID(),
+        peerId: p.peerId,
+        frameJson,
+        createdAt: Date.now(),
+        attempts: 0,
+      });
+    }
+    setNewGroupName("");
+    setGroups(await listGroups(db));
+    try {
+      const relay = await ensureRelay();
+      relay.joinGroup(groupId);
+    } catch {
+      /* optional */
+    }
+    toast.success("Group created — invites queued per contact");
+  };
+
+  const handleSendGroup = async () => {
+    if (!db || !identity || !isUnlocked(identity) || !selectedGroupId || !groupCompose.trim()) return;
+    const g = await getGroup(db, selectedGroupId);
+    if (!g) return;
+    const id = crypto.randomUUID();
+    const ts = Date.now();
+    const payload = { kind: "text" as const, text: groupCompose.trim(), fromUserId: identity.userId, id, ts };
+    const sealed = await encryptGroupPayload(g.groupKeyB64, payload);
+    try {
+      const relay = await ensureRelay();
+      relay.joinGroup(selectedGroupId);
+      relay.broadcastGroup(selectedGroupId, utf8ToB64(sealed));
+    } catch (e) {
+      console.error(e);
+      toast.error("Relay required for group fan-out");
+      return;
+    }
+    await putGroupMessage(db, {
+      id,
+      groupId: selectedGroupId,
+      fromUserId: identity.userId,
+      direction: "out",
+      plaintext: JSON.stringify({ kind: "text", text: groupCompose.trim() }),
+      ts,
+    });
+    setGroupCompose("");
+    setGroupMessages(await listGroupMessages(db, selectedGroupId));
+  };
+
+  const handleExportIdentity = async () => {
+    if (!identity || !isUnlocked(identity) || !exportPw.trim()) {
+      toast.error("Unlock keys and set an export password");
+      return;
+    }
+    try {
+      const bundle = await exportIdentityEncrypted(identity, exportPw.trim());
+      const blob = new Blob([JSON.stringify(bundle)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `aegis-p2p-identity-${identity.userId.slice(0, 8)}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setExportPw("");
+      toast.success("Encrypted export downloaded");
+    } catch {
+      toast.error("Export failed");
+    }
+  };
+
+  const handleImportIdentity = async () => {
+    if (!db || !importBundle.trim() || !importPw.trim()) return;
+    try {
+      const rec = await importIdentityEncrypted(JSON.parse(importBundle.trim()) as P2pIdentityExportV1, importPw.trim());
+      await putIdentity(db, rec);
+      setIdentity(rec);
+      setImportBundle("");
+      setImportPw("");
+      await refreshPeers(db);
+      setGroups(await listGroups(db));
+      toast.success("Identity imported");
+    } catch {
+      toast.error("Import failed");
+    }
+  };
+
+  const handleRotateIdentity = async () => {
+    if (!db) return;
+    if (!globalThis.confirm("Replace P2P identity? Local contacts and messages will be wiped.")) return;
+    closeRtc();
+    relayRef.current?.close();
+    relayRef.current = null;
+    await clearP2pStores(db);
+    const nid = await createFullIdentity();
+    await putIdentity(db, nid);
+    setIdentity(nid);
+    setMuted(new Set());
+    await refreshPeers(db);
+    setGroups([]);
+    setSelectedPeerId(null);
+    setSelectedGroupId(null);
+    toast.success("New identity created");
+  };
+
+  const handleFileAttach = async (file: File | null) => {
+    if (!file || !db || !selectedPeer || !identity || !isUnlocked(identity)) return;
+    if (!IPFS_UPLOAD_URL) {
+      toast.error("Set VITE_P2P_IPFS_UPLOAD_URL (multipart → {cid})");
+      return;
+    }
+    try {
+      const { blob, aesKeyB64 } = await encryptFileToBlob(file);
+      const { cid } = await uploadBlobToPinningApi({
+        blob,
+        filename: `${file.name}.enc`,
+        apiUrl: IPFS_UPLOAD_URL,
+        bearerToken: IPFS_TOKEN || undefined,
+      });
+      const fileKeyWrapJson = await wrapAesKeyForDmPeer(aesKeyB64, identity, selectedPeer);
+      const sk = sessionKeyMaterialRef.current.get(selectedPeer.peerId);
+      const plain: P2pPlainPayload = {
+        kind: "file",
+        name: file.name,
+        mime: file.type || "application/octet-stream",
+        size: file.size,
+        cid,
+        fileKeyWrapJson,
+      };
+      const wire = await buildOutgoingChat(identity, selectedPeer, plain, { sessionKeyMaterial32: sk ?? null });
+      const frame: P2pChannelFrame = { type: "chat", payload: wire };
+      const frameJson = JSON.stringify(frame);
+      const session = rtcRef.current;
+      if (session?.dc?.readyState === "open") {
+        session.sendJson(frame);
+      } else {
+        await putOutbox(db, {
+          id: crypto.randomUUID(),
+          peerId: selectedPeer.peerId,
+          frameJson,
+          createdAt: Date.now(),
+          attempts: 0,
+        });
+        toast.message("File message queued for P2P");
+      }
+      await putMessage(db, {
+        id: wire.id,
+        peerId: selectedPeer.peerId,
+        direction: "out",
+        plaintext: JSON.stringify(plain),
+        ts: wire.ts,
+      });
+      await refreshMessages(db, selectedPeer.peerId);
+      toast.success("File attached");
+    } catch (e) {
+      console.error(e);
+      toast.error("File attach failed");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   const handleSend = async () => {
     if (!compose.trim() || !db || !selectedPeer || !identity || !isUnlocked(identity)) return;
@@ -529,7 +882,6 @@ export default function Messages() {
       const session = rtcRef.current;
       if (session?.dc?.readyState === "open") {
         session.sendJson(frame);
-        session.sendJson({ type: "delivered", v: 1, messageId: wire.id });
       } else {
         await putOutbox(db, {
           id: crypto.randomUUID(),
@@ -565,6 +917,68 @@ export default function Messages() {
       await refreshMessages(db, selectedPeer.peerId);
     } catch {
       toast.error("Send failed");
+    }
+  };
+
+  const handleShareWalletAddresses = async () => {
+    if (!db || !selectedPeer || !identity || !isUnlocked(identity)) return;
+    const m = walletSessionGetMnemonic();
+    if (!m) {
+      toast.error("Unlock your local wallet on the Wallets tab first");
+      return;
+    }
+    try {
+      const wdb = await openChainWalletDb();
+      const st = await getWalletSettings(wdb);
+      const addrs = await addressesForSettings(m, st);
+      const payload: WalletInfoV1 = {
+        v: 1,
+        type: "wallet_info",
+        chains: { ethereum: addrs.ethereum, bitcoin: addrs.bitcoin },
+      };
+      const frame: P2pChannelFrame = { type: "wallet_info", payload };
+      const frameJson = JSON.stringify(frame);
+      const session = rtcRef.current;
+      if (session?.dc?.readyState === "open") {
+        session.sendJson(frame);
+      } else {
+        await putOutbox(db, {
+          id: crypto.randomUUID(),
+          peerId: selectedPeer.peerId,
+          frameJson,
+          createdAt: Date.now(),
+          attempts: 0,
+        });
+        if (relayRef.current?.connected && RELAY_WS_URL) {
+          try {
+            relayRef.current.putMailbox(
+              selectedPeer.peerId,
+              utf8ToB64(frameJson),
+              3600,
+              RELAY_SECRET || undefined,
+            );
+            toast.message("Wallet info queued + mailbox");
+          } catch {
+            toast.message("Wallet info queued for P2P");
+          }
+        } else {
+          toast.message("Wallet info queued for P2P");
+        }
+      }
+      await putMessage(db, {
+        id: crypto.randomUUID(),
+        peerId: selectedPeer.peerId,
+        direction: "out",
+        ts: Date.now(),
+        plaintext: "Wallet addresses (structured)",
+        narrativeKind: "wallet_info",
+        walletInfoPayload: payload,
+      });
+      await refreshMessages(db, selectedPeer.peerId);
+      toast.success("Shared wallet addresses");
+    } catch (e) {
+      console.error(e);
+      toast.error("Could not share addresses");
     }
   };
 
@@ -608,6 +1022,16 @@ export default function Messages() {
     await setBlockedPeerIds(db, Array.from(next));
     setBlocked(next);
     toast.success(next.has(selectedPeerId) ? "Peer blocked" : "Peer unblocked");
+  };
+
+  const toggleMutePeer = async () => {
+    if (!db || !selectedPeerId) return;
+    const next = new Set(muted);
+    if (next.has(selectedPeerId)) next.delete(selectedPeerId);
+    else next.add(selectedPeerId);
+    await setMutedPeerIds(db, Array.from(next));
+    setMuted(next);
+    toast.success(next.has(selectedPeerId) ? "Muted inbound" : "Unmuted inbound");
   };
 
   const removePeer = async () => {
@@ -662,12 +1086,30 @@ export default function Messages() {
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Messages</h1>
             <p className="text-xs text-muted-foreground font-mono mt-0.5">
-              Decentralized P2P · no relay server · {user?.name ? `Signed in as ${user.name}` : "Local keys"}
+              Decentralized P2P · optional relay · {user?.name ? `Signed in as ${user.name}` : "Local keys"}
             </p>
           </div>
-          <div className="encryption-badge">
-            <Radio size={11} />
-            P2P + E2E
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="encryption-badge">
+              <Radio size={11} />
+              P2P + E2E
+            </div>
+            <div className="flex rounded-md border border-border overflow-hidden text-[10px] font-mono">
+              <button
+                type="button"
+                className={`px-2 py-1 ${panel === "dm" ? "bg-accent" : "bg-background"}`}
+                onClick={() => setPanel("dm")}
+              >
+                Direct
+              </button>
+              <button
+                type="button"
+                className={`px-2 py-1 ${panel === "groups" ? "bg-accent" : "bg-background"}`}
+                onClick={() => setPanel("groups")}
+              >
+                Groups
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -720,6 +1162,49 @@ export default function Messages() {
             )}
           </div>
 
+          {!locked && (
+            <div className="px-4 py-2 border-b border-border space-y-2">
+              <div className="mono-label flex items-center gap-1">
+                <Download size={12} />
+                Backup / rotate
+              </div>
+              <div className="flex gap-1">
+                <Input
+                  type="password"
+                  placeholder="Export password"
+                  value={exportPw}
+                  onChange={(e) => setExportPw(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <Button size="sm" variant="outline" className="h-8 shrink-0" onClick={() => void handleExportIdentity()}>
+                  <Download size={14} />
+                </Button>
+              </div>
+              <Textarea
+                value={importBundle}
+                onChange={(e) => setImportBundle(e.target.value)}
+                placeholder="Paste encrypted export JSON…"
+                rows={2}
+                className="text-[10px] font-mono resize-none min-h-[40px]"
+              />
+              <div className="flex gap-1">
+                <Input
+                  type="password"
+                  placeholder="Import password"
+                  value={importPw}
+                  onChange={(e) => setImportPw(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <Button size="sm" variant="secondary" className="h-8 shrink-0" onClick={() => void handleImportIdentity()}>
+                  <Upload size={14} />
+                </Button>
+              </div>
+              <Button size="sm" variant="destructive" className="w-full h-8 text-xs" onClick={() => void handleRotateIdentity()}>
+                New identity (wipes local P2P data)
+              </Button>
+            </div>
+          )}
+
           <div className="px-4 py-2 border-b border-border space-y-2">
             <div className="mono-label flex items-center gap-1">
               <UserPlus size={12} />
@@ -750,7 +1235,10 @@ export default function Messages() {
                 <button
                   key={p.peerId}
                   type="button"
-                  onClick={() => setSelectedPeerId(p.peerId)}
+                  onClick={() => {
+                    setPanel("dm");
+                    setSelectedPeerId(p.peerId);
+                  }}
                   className={`w-full text-left px-4 py-3 border-b border-border/50 hover:bg-accent/50 ${
                     selectedPeerId === p.peerId ? "bg-accent" : ""
                   }`}
@@ -766,6 +1254,9 @@ export default function Messages() {
                     {blocked.has(p.peerId) && (
                       <span className="text-[9px] font-mono text-destructive shrink-0">blocked</span>
                     )}
+                    {muted.has(p.peerId) && (
+                      <span className="text-[9px] font-mono text-muted-foreground shrink-0">muted</span>
+                    )}
                   </div>
                 </button>
               ))
@@ -778,7 +1269,86 @@ export default function Messages() {
         </div>
 
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          {selectedPeer ? (
+          {panel === "groups" ? (
+            <div className="flex flex-col flex-1 min-h-0">
+              <div className="px-5 py-3 border-b border-border space-y-2 shrink-0">
+                <div className="text-sm font-semibold flex items-center gap-2">
+                  <Users size={16} />
+                  Groups
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    placeholder="New group name"
+                    className="h-8 text-xs"
+                    disabled={locked}
+                  />
+                  <Button size="sm" className="h-8 shrink-0" disabled={locked} onClick={() => void handleCreateGroup()}>
+                    Create
+                  </Button>
+                </div>
+                {RELAY_WS_URL ? (
+                  <Button size="sm" variant="outline" className="h-8 text-xs w-full" disabled={locked} onClick={() => void handleRelayConnect()}>
+                    Connect relay (groups + mailbox)
+                  </Button>
+                ) : (
+                  <p className="text-[10px] font-mono text-muted-foreground">Set VITE_P2P_RELAY_URL for live group fan-out.</p>
+                )}
+              </div>
+              <div className="flex flex-1 min-h-0">
+                <div className="w-48 border-r border-border overflow-y-auto shrink-0">
+                  {groups.length === 0 ? (
+                    <p className="text-[10px] font-mono text-muted-foreground p-3">No groups</p>
+                  ) : (
+                    groups.map((g) => (
+                      <button
+                        key={g.groupId}
+                        type="button"
+                        className={`w-full text-left px-3 py-2 text-xs border-b border-border/50 ${selectedGroupId === g.groupId ? "bg-accent" : ""}`}
+                        onClick={() => setSelectedGroupId(g.groupId)}
+                      >
+                        {g.name}
+                      </button>
+                    ))
+                  )}
+                </div>
+                <div className="flex-1 flex flex-col min-w-0 min-h-0">
+                  {selectedGroupId ? (
+                    <>
+                      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+                        {groupMessages.map((m) => (
+                          <div key={m.id} className="text-xs font-mono border-b border-border/40 pb-2">
+                            <span className="text-muted-foreground">{m.fromUserId.slice(0, 8)}…</span>{" "}
+                            {displayPlaintextForUi(m.plaintext)}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="p-3 border-t border-border flex gap-2 shrink-0">
+                        <Input
+                          value={groupCompose}
+                          onChange={(e) => setGroupCompose(e.target.value)}
+                          placeholder="Group message…"
+                          className="h-9 text-xs"
+                          disabled={locked}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void handleSendGroup();
+                          }}
+                        />
+                        <Button size="sm" className="h-9 shrink-0" disabled={locked} onClick={() => void handleSendGroup()}>
+                          <Send size={14} />
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs font-mono">
+                      Select a group
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : selectedPeer ? (
             <>
               <div className="px-5 py-3 border-b border-border shrink-0 flex items-center justify-between gap-2 flex-wrap">
                 <div>
@@ -786,9 +1356,31 @@ export default function Messages() {
                   <div className="text-[10px] font-mono text-muted-foreground">
                     WebRTC: <span className="text-foreground">{rtcConn}</span>
                     {outboxCount > 0 && <span className="ml-2 text-amber-500">{outboxCount} queued</span>}
+                    {typingRemote && <span className="ml-2 text-sky-500">typing…</span>}
                   </div>
+                  {(selectedPeer.chainAddresses?.ethereum || selectedPeer.chainAddresses?.bitcoin) && (
+                    <div className="text-[10px] font-mono text-muted-foreground mt-1 space-y-0.5 max-w-xl">
+                      {selectedPeer.chainAddresses.ethereum && (
+                        <div className="break-all">
+                          <span className="text-foreground/70">Their ETH:</span> {selectedPeer.chainAddresses.ethereum}
+                        </div>
+                      )}
+                      {selectedPeer.chainAddresses.bitcoin && (
+                        <div className="break-all">
+                          <span className="text-foreground/70">Their BTC:</span> {selectedPeer.chainAddresses.bitcoin}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2 flex-wrap">
+                  <Button size="sm" variant="outline" className="h-8 text-xs" disabled={locked} onClick={() => void handleShareWalletAddresses()}>
+                    <Wallet size={14} className="mr-1" />
+                    Share my addresses
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-8 text-xs" disabled={locked} onClick={() => void toggleMutePeer()}>
+                    {muted.has(selectedPeer.peerId) ? "Unmute" : "Mute in"}
+                  </Button>
                   <Button size="sm" variant="outline" className="h-8 text-xs" disabled={locked} onClick={() => void toggleBlockPeer()}>
                     {blocked.has(selectedPeer.peerId) ? "Unblock" : "Block"}
                   </Button>
@@ -845,6 +1437,37 @@ export default function Messages() {
                 </div>
               </div>
 
+              {RELAY_WS_URL && (
+                <div className="px-5 py-3 border-b border-border space-y-2 shrink-0">
+                  <div className="mono-label">Optional relay signaling</div>
+                  <Input
+                    value={relaySessionId}
+                    onChange={(e) => setRelaySessionId(e.target.value)}
+                    placeholder="Session id (answerer pastes initiator’s)"
+                    className="h-8 text-[10px] font-mono"
+                    disabled={locked}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" className="h-8 text-xs" disabled={locked} onClick={() => void handleRelayConnect()}>
+                      Connect relay
+                    </Button>
+                    <Button size="sm" variant="secondary" className="h-8 text-xs" disabled={locked} onClick={() => void startInitiatorRelay()}>
+                      Initiator (relay)
+                    </Button>
+                    <Button size="sm" variant="secondary" className="h-8 text-xs" disabled={locked} onClick={() => void runAnswererRelay()}>
+                      Answerer (relay)
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => void handleFileAttach(e.target.files?.[0] ?? null)}
+              />
+
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
                 {storedMessages.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-xs font-mono">
@@ -852,28 +1475,36 @@ export default function Messages() {
                     <p className="mt-2">No messages yet</p>
                   </div>
                 ) : (
-                  storedMessages.map((msg) => {
-                    const isOwn = msg.direction === "out";
-                    return (
-                      <div key={msg.id} className={`flex gap-3 ${isOwn ? "flex-row-reverse" : ""}`}>
-                        <div className="w-7 h-7 rounded-full bg-foreground/10 border border-border flex items-center justify-center shrink-0 mt-0.5 text-[9px] font-mono">
-                          {isOwn ? "You" : initials(selectedPeer.displayName ?? "?")}
-                        </div>
-                        <div className={`max-w-[min(100%,28rem)] flex flex-col gap-1 ${isOwn ? "items-end" : "items-start"}`}>
-                          <div
-                            className={`px-3.5 py-2.5 rounded-xl text-xs leading-relaxed ${
-                              isOwn
-                                ? "bg-foreground text-background rounded-tr-sm"
-                                : "bg-card border border-border rounded-tl-sm"
-                            }`}
-                          >
-                            {msg.plaintext}
+                  <>
+                    {storedMessages
+                      .filter((msg) => !msg.expiresAt || msg.expiresAt > Date.now())
+                      .map((msg) => {
+                        const isOwn = msg.direction === "out";
+                        return (
+                          <div key={msg.id} className={`flex gap-3 ${isOwn ? "flex-row-reverse" : ""}`}>
+                            <div className="w-7 h-7 rounded-full bg-foreground/10 border border-border flex items-center justify-center shrink-0 mt-0.5 text-[9px] font-mono">
+                              {isOwn ? "You" : initials(selectedPeer.displayName ?? "?")}
+                            </div>
+                            <div className={`max-w-[min(100%,28rem)] flex flex-col gap-1 ${isOwn ? "items-end" : "items-start"}`}>
+                              <div
+                                className={`px-3.5 py-2.5 rounded-xl text-xs leading-relaxed ${
+                                  isOwn
+                                    ? "bg-foreground text-background rounded-tr-sm"
+                                    : "bg-card border border-border rounded-tl-sm"
+                                }`}
+                              >
+                                <DmMessageBody msg={msg} />
+                              </div>
+                              <span className="text-[10px] font-mono text-muted-foreground">
+                                {formatMessageTime(msg.ts)}
+                                {msg.deliveredAt ? " · delivered" : ""}
+                                {msg.seenAt ? " · seen" : ""}
+                              </span>
+                            </div>
                           </div>
-                          <span className="text-[10px] font-mono text-muted-foreground">{formatMessageTime(msg.ts)}</span>
-                        </div>
-                      </div>
-                    );
-                  })
+                        );
+                      })}
+                  </>
                 )}
                 <div ref={messagesEndRef} />
               </div>
@@ -882,26 +1513,49 @@ export default function Messages() {
                 <div className="flex gap-3">
                   <textarea
                     value={compose}
-                    onChange={(e) => setCompose(e.target.value)}
+                    onChange={(e) => {
+                      setCompose(e.target.value);
+                      if (identity && selectedPeer && rtcRef.current?.dc?.readyState === "open") {
+                        sendDmControl({
+                          type: "typing",
+                          v: 1,
+                          chat: "dm",
+                          peerUserId: identity.userId,
+                          active: e.target.value.length > 0,
+                        });
+                      }
+                    }}
                     onKeyDown={handleKeyDown}
                     placeholder={
                       locked ? "Unlock keys to send…" : blocked.has(selectedPeer.peerId) ? "Unblock peer to send…" : "Type a message…"
                     }
-                    disabled={locked || blocked.has(selectedPeer.peerId)}
+                    disabled={locked || blocked.has(selectedPeer.peerId) || muted.has(selectedPeer.peerId)}
                     rows={2}
                     className="flex-1 bg-input border border-border rounded-lg px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none transition-colors font-sans disabled:opacity-50"
                   />
                   <button
                     type="button"
+                    disabled={locked || !IPFS_UPLOAD_URL}
+                    title={IPFS_UPLOAD_URL ? "Attach encrypted file" : "Set VITE_P2P_IPFS_UPLOAD_URL"}
+                    className="flex items-center justify-center w-10 h-10 rounded-lg border border-border hover:bg-accent transition-all disabled:opacity-40 shrink-0 self-end"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload size={15} />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => void handleSend()}
-                    disabled={!compose.trim() || locked || blocked.has(selectedPeer.peerId)}
+                    disabled={
+                      !compose.trim() || locked || blocked.has(selectedPeer.peerId) || muted.has(selectedPeer.peerId)
+                    }
                     className="flex items-center justify-center w-10 h-10 rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0 self-end"
                   >
                     <Send size={15} />
                   </button>
                 </div>
                 <p className="text-[10px] font-mono text-muted-foreground mt-2">
-                  STUN-only — restrictive NATs may fail without your own TURN relay.
+                  ICE servers: set <span className="text-foreground">VITE_P2P_ICE_SERVERS</span> JSON (STUN/TURN). Ephemeral
+                  session keys mix X25519 handshake on each data channel open.
                 </p>
               </div>
             </>
