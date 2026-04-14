@@ -12,7 +12,9 @@ export function b64ToBytes(b64: string): Uint8Array {
 }
 
 export function hexFromBytes(bytes: Uint8Array): string {
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  let h = "";
+  for (let i = 0; i < bytes.length; i++) h += bytes[i].toString(16).padStart(2, "0");
+  return h;
 }
 
 export function bytesFromHex(hex: string): Uint8Array {

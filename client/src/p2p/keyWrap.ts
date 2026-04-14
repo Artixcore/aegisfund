@@ -16,7 +16,7 @@ export async function wrapIdentitySecrets(id: P2pIdentityRecord, passphrase: str
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveBits"]);
   const aesRaw = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: PBKDF2_ITER, hash: "SHA-256" },
+    { name: "PBKDF2", salt: new Uint8Array(salt) as BufferSource, iterations: PBKDF2_ITER, hash: "SHA-256" },
     keyMaterial,
     256,
   );
@@ -44,15 +44,16 @@ export async function unwrapIdentitySecrets(id: P2pIdentityRecord, passphrase: s
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveBits"]);
   const aesRaw = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: PBKDF2_ITER, hash: "SHA-256" },
+    { name: "PBKDF2", salt: new Uint8Array(salt) as BufferSource, iterations: PBKDF2_ITER, hash: "SHA-256" },
     keyMaterial,
     256,
   );
   const aesKey = await crypto.subtle.importKey("raw", aesRaw, { name: "AES-GCM" }, false, ["decrypt"]);
+  const ivBytes = b64ToBytes(iv);
   const plainBuf = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: b64ToBytes(iv) as BufferSource },
+    { name: "AES-GCM", iv: new Uint8Array(ivBytes) as BufferSource },
     aesKey,
-    b64ToBytes(ciphertext) as BufferSource,
+    new Uint8Array(b64ToBytes(ciphertext)) as BufferSource,
   );
   const parsed = JSON.parse(new TextDecoder().decode(plainBuf)) as {
     signingSecretB64: string;

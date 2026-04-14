@@ -40,3 +40,33 @@ This document maps cryptographic goals onto the codebase. It is a living spec: i
 ## Rotation
 
 - When upgrading from shared `encryptionKey` to per-session keys, bump a `keyVersion` column on conversations and re-wrap or archive old threads.
+
+## Decentralized P2P mode (Messages UI)
+
+The [`Messages`](../client/src/pages/Messages.tsx) page uses **browser-only** P2P chat (no Aegis server for transport or persistence). The legacy `messages.*` tRPC procedures remain in the codebase for tests and any future reuse, but this UI does not call them.
+
+### Threat model (P2P MVP)
+
+- **No relay operator** for message transport; TLS to Aegis still applies for login and other pages.
+- **STUN-only** WebRTC: pathological NATs may fail to connect without a **TURN** relay (operators can self-host TURN; not bundled here).
+- **Metadata** (who connects to whom, IP timing, message sizes on the wire) is **not** hidden from network observers.
+- **Malicious clients / peers** are not fully mitigated; signatures prove possession of the claimed Ed25519 key for the signed payload only.
+- **Forward secrecy**: not provided in v1 (static X25519 long-term keys). Upgrade path would be Double Ratchet / pre-keys.
+
+### Cryptography
+
+1. **Identity**: separate Ed25519 (`@noble/ed25519` via `@noble/curves`) and X25519 keypairs; `userId` is hex(SHA-256(Ed25519 public key)).
+2. **Invite**: JSON [`P2pInviteV1`](../client/src/p2p/types.ts) with both public keys; share via copy or QR.
+3. **ECDH**: X25519 shared secret → HKDF-SHA256 (salt + info `aegis-p2p-msg-v1`) → AES-256-GCM for the inner envelope (same `iv` + `ciphertext` shape as relay mode).
+4. **Sign**: Ed25519 over SHA-256 of canonical string `aegis_p2p_v1|v|fromUserId|fromSigningPubB64|toUserId|ts|nonce|iv|ciphertext`.
+5. **Replay / duplicates**: client-side [`ReplayGuard`](../client/src/p2p/replay.ts) per sender `userId` using message `id`, `nonce`, and timestamp window.
+
+### Storage and offline
+
+- **IndexedDB** database `aegis-p2p-v1`: identity, peers, decrypted messages, outbox rows for sends when the data channel is down (drained on connect).
+- Optional **PBKDF2** (250k iterations) + AES-GCM wraps private keys when the user sets a lock passphrase ([`keyWrap.ts`](../client/src/p2p/keyWrap.ts)).
+
+### WebRTC signaling
+
+- **Out-of-band only**: initiator pastes a JSON package (SDP + gathered ICE candidates) to the answerer; answerer returns a second package. No signaling server.
+- Implementation: [`client/src/p2p/webrtc.ts`](../client/src/p2p/webrtc.ts).

@@ -21,8 +21,7 @@ import {
   type P2pChannelFrame,
   type P2pIdentityRecord,
   type P2pPeerRecord,
-  type P2pRtcSession,
-  P2pRtcSession as P2pRtcSessionClass,
+  P2pRtcSession,
   ReplayGuard,
   buildOutgoingChat,
   decryptIncomingChat,
@@ -84,7 +83,7 @@ export default function Messages() {
   const [offerIn, setOfferIn] = useState("");
   const [answerOut, setAnswerOut] = useState("");
   const [answerIn, setAnswerIn] = useState("");
-  const [rtcConn, setRtcConn] = useState<RTCPeerConnectionState | "new">("new");
+  const [rtcConn, setRtcConn] = useState<string>("new");
   const rtcRef = useRef<P2pRtcSession | null>(null);
   const replayRef = useRef(new ReplayGuard());
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -216,15 +215,17 @@ export default function Messages() {
 
   const startInitiator = async () => {
     if (!selectedPeer || !identity || !isUnlocked(identity)) return;
+    const peerId = selectedPeer.peerId;
     closeRtc();
     setOfferOut("");
     setAnswerIn("");
     try {
-      const session = new P2pRtcSessionClass({
+      const session = new P2pRtcSession({
         isInitiator: true,
         onMessage: (t) => void handleInboundFrame(t, selectedPeer),
         onChannelOpen: () => {
-          void drainOutbox(session, selectedPeer.peerId);
+          const s = rtcRef.current;
+          if (s) void drainOutbox(s, peerId);
           toast.success("P2P channel open");
         },
         onConnectionState: (s) => setRtcConn(s),
@@ -255,6 +256,7 @@ export default function Messages() {
 
   const runAnswerer = async () => {
     if (!selectedPeer || !identity || !isUnlocked(identity)) return;
+    const peerId = selectedPeer.peerId;
     if (!offerIn.trim()) {
       toast.error("Paste offer JSON from initiator");
       return;
@@ -262,11 +264,12 @@ export default function Messages() {
     closeRtc();
     setAnswerOut("");
     try {
-      const session = new P2pRtcSessionClass({
+      const session = new P2pRtcSession({
         isInitiator: false,
         onMessage: (t) => void handleInboundFrame(t, selectedPeer),
         onChannelOpen: () => {
-          void drainOutbox(session, selectedPeer.peerId);
+          const s = rtcRef.current;
+          if (s) void drainOutbox(s, peerId);
           toast.success("P2P channel open");
         },
         onConnectionState: (s) => setRtcConn(s),
@@ -352,7 +355,7 @@ export default function Messages() {
     const next = new Set(blocked);
     if (next.has(selectedPeerId)) next.delete(selectedPeerId);
     else next.add(selectedPeerId);
-    await setBlockedPeerIds(db, [...next]);
+    await setBlockedPeerIds(db, Array.from(next));
     setBlocked(next);
     toast.success(next.has(selectedPeerId) ? "Peer blocked" : "Peer unblocked");
   };
@@ -631,15 +634,17 @@ export default function Messages() {
                     value={compose}
                     onChange={(e) => setCompose(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={locked ? "Unlock keys to send…" : "Type a message…"}
-                    disabled={locked}
+                    placeholder={
+                      locked ? "Unlock keys to send…" : blocked.has(selectedPeer.peerId) ? "Unblock peer to send…" : "Type a message…"
+                    }
+                    disabled={locked || blocked.has(selectedPeer.peerId)}
                     rows={2}
                     className="flex-1 bg-input border border-border rounded-lg px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none transition-colors font-sans disabled:opacity-50"
                   />
                   <button
                     type="button"
                     onClick={() => void handleSend()}
-                    disabled={!compose.trim() || locked}
+                    disabled={!compose.trim() || locked || blocked.has(selectedPeer.peerId)}
                     className="flex items-center justify-center w-10 h-10 rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0 self-end"
                   >
                     <Send size={15} />

@@ -6,7 +6,7 @@ const HKDF_SALT_LABEL = new TextEncoder().encode("aegis-p2p-hkdf-salt-v1");
 const HKDF_INFO = new TextEncoder().encode("aegis-p2p-msg-v1");
 
 async function sha256(data: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", data as BufferSource));
 }
 
 export async function userIdFromSigningPublicKey(signingPublicKey: Uint8Array): Promise<string> {
@@ -68,9 +68,9 @@ export async function sharedSecretFromPair(
 
 async function hkdfAes256Key(ikm: Uint8Array): Promise<CryptoKey> {
   const salt = await sha256(HKDF_SALT_LABEL);
-  const baseKey = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+  const baseKey = await crypto.subtle.importKey("raw", ikm as BufferSource, "HKDF", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "HKDF", hash: "SHA-256", salt, info: HKDF_INFO },
+    { name: "HKDF", hash: "SHA-256", salt: salt as BufferSource, info: HKDF_INFO },
     baseKey,
     256,
   );
