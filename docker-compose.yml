@@ -1,0 +1,29 @@
+# Local MySQL for self-hosted deployments (one DB per VPS). Optional if you use a system MySQL instead.
+# Copy .env.example to .env, set MYSQL_* and DATABASE_URL, then: npm run db:up (or npm run db:up:docker)
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-aegis_fund}
+      MYSQL_USER: ${MYSQL_USER:-aegis}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-aegis_local}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-aegis_root_local}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+volumes:
+  mysql_data:

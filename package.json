@@ -11,6 +11,9 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
+    "db:up": "node scripts/db-up.mjs",
+    "db:up:docker": "docker compose up -d mysql",
+    "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {
