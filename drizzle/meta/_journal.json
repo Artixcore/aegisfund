@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1775756580397,
+      "tag": "0000_flat_bloodaxe",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1775756869158,
+      "tag": "0001_heavy_maelstrom",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1775758845777,
+      "tag": "0002_secret_norman_osborn",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1776175477380,
+      "tag": "0003_safe_rictor",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1776176000000,
+      "tag": "0004_real_aegis_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1776193186811,
+      "tag": "0005_registration_ip",
+      "breakpoints": true
+    }
+  ]
+}

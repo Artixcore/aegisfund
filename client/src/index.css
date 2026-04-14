@@ -1,0 +1,348 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   AEGIS FUND — PREMIUM DARK DESIGN SYSTEM
+   Bloomberg Terminal × Apple Polish × Institutional Finance
+   ============================================================ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Aegis brand accent colors */
+  --color-aegis-green: oklch(0.72 0.17 145);
+  --color-aegis-red: oklch(0.60 0.20 25);
+  --color-aegis-gold: oklch(0.78 0.12 85);
+  --color-aegis-blue: oklch(0.65 0.15 240);
+  --color-aegis-purple: oklch(0.60 0.15 290);
+  --color-aegis-cyan: oklch(0.72 0.12 195);
+
+  /* Typography */
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* ============================================================
+   DARK THEME (default — always dark)
+   ============================================================ */
+:root {
+  --radius: 0.5rem;
+  --primary: oklch(0.95 0 0);
+  --primary-foreground: oklch(0.07 0 0);
+  --background: oklch(0.07 0 0);
+  --foreground: oklch(0.93 0 0);
+  --card: oklch(0.10 0 0);
+  --card-foreground: oklch(0.93 0 0);
+  --popover: oklch(0.11 0 0);
+  --popover-foreground: oklch(0.93 0 0);
+  --secondary: oklch(0.15 0 0);
+  --secondary-foreground: oklch(0.80 0 0);
+  --muted: oklch(0.14 0 0);
+  --muted-foreground: oklch(0.52 0 0);
+  --accent: oklch(0.18 0 0);
+  --accent-foreground: oklch(0.90 0 0);
+  --destructive: oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(0.95 0 0);
+  --border: oklch(0.20 0 0);
+  --input: oklch(0.14 0 0);
+  --ring: oklch(0.40 0 0);
+  --sidebar: oklch(0.08 0 0);
+  --sidebar-foreground: oklch(0.65 0 0);
+  --sidebar-primary: oklch(0.93 0 0);
+  --sidebar-primary-foreground: oklch(0.07 0 0);
+  --sidebar-accent: oklch(0.14 0 0);
+  --sidebar-accent-foreground: oklch(0.90 0 0);
+  --sidebar-border: oklch(0.16 0 0);
+  --sidebar-ring: oklch(0.40 0 0);
+}
+
+/* ============================================================
+   BASE LAYER
+   ============================================================ */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply scroll-smooth;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: oklch(0.08 0 0); }
+  ::-webkit-scrollbar-thumb { background: oklch(0.25 0 0); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: oklch(0.35 0 0); }
+
+  ::selection { background: oklch(0.95 0 0 / 0.15); color: oklch(0.95 0 0); }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  a[href],
+  select:not(:disabled) {
+    @apply cursor-pointer;
+  }
+}
+
+/* ============================================================
+   COMPONENT LAYER
+   ============================================================ */
+@layer components {
+  /* Container */
+  .container {
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  @media (min-width: 640px) {
+    .container { padding-left: 1.5rem; padding-right: 1.5rem; }
+  }
+  @media (min-width: 1024px) {
+    .container { padding-left: 2rem; padding-right: 2rem; max-width: 1280px; }
+  }
+
+  /* Flex fix */
+  .flex { min-height: 0; min-width: 0; }
+
+  /* ---- Aegis Card ---- */
+  .aegis-card {
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .aegis-card:hover {
+    border-color: oklch(0.28 0 0);
+    box-shadow: 0 4px 20px oklch(0 0 0 / 0.5);
+  }
+
+  /* ---- Status Badges ---- */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.125rem 0.625rem;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .status-running {
+    background-color: oklch(0.65 0.15 240 / 0.12);
+    color: oklch(0.65 0.15 240);
+    border: 1px solid oklch(0.65 0.15 240 / 0.25);
+  }
+  .status-idle {
+    background-color: oklch(0.14 0 0);
+    color: oklch(0.52 0 0);
+    border: 1px solid oklch(0.20 0 0);
+  }
+  .status-complete {
+    background-color: oklch(0.72 0.17 145 / 0.12);
+    color: oklch(0.72 0.17 145);
+    border: 1px solid oklch(0.72 0.17 145 / 0.25);
+  }
+  .status-alert {
+    background-color: oklch(0.60 0.20 25 / 0.12);
+    color: oklch(0.60 0.20 25);
+    border: 1px solid oklch(0.60 0.20 25 / 0.25);
+  }
+  .status-analyzing {
+    background-color: oklch(0.78 0.12 85 / 0.12);
+    color: oklch(0.78 0.12 85);
+    border: 1px solid oklch(0.78 0.12 85 / 0.25);
+  }
+
+  /* ---- Mono label ---- */
+  .mono-label {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--muted-foreground);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  /* ---- Price colors ---- */
+  .price-up { color: oklch(0.72 0.17 145); font-family: var(--font-mono); }
+  .price-down { color: oklch(0.60 0.20 25); font-family: var(--font-mono); }
+
+  /* ---- Encryption badge ---- */
+  .encryption-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    background-color: oklch(0.72 0.17 145 / 0.10);
+    color: oklch(0.72 0.17 145);
+    border: 1px solid oklch(0.72 0.17 145 / 0.20);
+  }
+
+  /* ---- Pulse dot ---- */
+  .pulse-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+  .pulse-green { background-color: oklch(0.72 0.17 145); box-shadow: 0 0 6px oklch(0.72 0.17 145 / 0.6); }
+  .pulse-blue { background-color: oklch(0.65 0.15 240); box-shadow: 0 0 6px oklch(0.65 0.15 240 / 0.6); }
+  .pulse-gold { background-color: oklch(0.78 0.12 85); box-shadow: 0 0 6px oklch(0.78 0.12 85 / 0.6); }
+  .pulse-gray { background-color: oklch(0.35 0 0); }
+
+  /* ---- Nav item ---- */
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--sidebar-foreground);
+    transition: all 0.15s ease;
+    cursor: pointer;
+    user-select: none;
+    text-decoration: none;
+  }
+  .nav-item:hover {
+    background-color: var(--sidebar-accent);
+    color: var(--sidebar-accent-foreground);
+  }
+  .nav-item-active {
+    background-color: var(--sidebar-accent);
+    color: var(--sidebar-primary);
+  }
+
+  /* ---- Glass ---- */
+  .glass {
+    background: oklch(0.12 0 0 / 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  /* ---- Gradient text ---- */
+  .gradient-text {
+    background: linear-gradient(135deg, oklch(0.95 0 0), oklch(0.60 0 0));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ---- Shimmer skeleton ---- */
+  .shimmer {
+    background: linear-gradient(90deg, oklch(0.14 0 0) 25%, oklch(0.20 0 0) 50%, oklch(0.14 0 0) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  /* ---- Section divider ---- */
+  .aegis-divider {
+    border-top: 1px solid var(--border);
+    margin: 1rem 0;
+  }
+}
+
+/* ============================================================
+   UTILITY LAYER — Aegis color tokens
+   ============================================================ */
+@layer utilities {
+  .text-aegis-green { color: oklch(0.72 0.17 145); }
+  .text-aegis-red   { color: oklch(0.60 0.20 25); }
+  .text-aegis-gold  { color: oklch(0.78 0.12 85); }
+  .text-aegis-blue  { color: oklch(0.65 0.15 240); }
+  .text-aegis-purple{ color: oklch(0.60 0.15 290); }
+  .text-aegis-cyan  { color: oklch(0.72 0.12 195); }
+
+  .bg-aegis-green\/10  { background-color: oklch(0.72 0.17 145 / 0.10); }
+  .bg-aegis-green\/20  { background-color: oklch(0.72 0.17 145 / 0.20); }
+  .bg-aegis-red\/10    { background-color: oklch(0.60 0.20 25 / 0.10); }
+  .bg-aegis-red\/20    { background-color: oklch(0.60 0.20 25 / 0.20); }
+  .bg-aegis-gold\/10   { background-color: oklch(0.78 0.12 85 / 0.10); }
+  .bg-aegis-gold\/20   { background-color: oklch(0.78 0.12 85 / 0.20); }
+  .bg-aegis-blue\/10   { background-color: oklch(0.65 0.15 240 / 0.10); }
+  .bg-aegis-blue\/20   { background-color: oklch(0.65 0.15 240 / 0.20); }
+  .bg-aegis-purple\/10 { background-color: oklch(0.60 0.15 290 / 0.10); }
+  .bg-aegis-cyan\/10   { background-color: oklch(0.72 0.12 195 / 0.10); }
+
+  .border-aegis-green\/20  { border-color: oklch(0.72 0.17 145 / 0.20); }
+  .border-aegis-red\/20    { border-color: oklch(0.60 0.20 25 / 0.20); }
+  .border-aegis-gold\/20   { border-color: oklch(0.78 0.12 85 / 0.20); }
+  .border-aegis-blue\/20   { border-color: oklch(0.65 0.15 240 / 0.20); }
+  .border-aegis-purple\/20 { border-color: oklch(0.60 0.15 290 / 0.20); }
+
+  .font-mono { font-family: var(--font-mono); }
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+}
+
+/* ============================================================
+   KEYFRAMES
+   ============================================================ */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes fade-up {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes slide-in {
+  from { transform: translateX(-10px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-fade-up { animation: fade-up 0.3s ease forwards; }
+.animate-slide-in { animation: slide-in 0.25s ease forwards; }

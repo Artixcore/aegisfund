@@ -1,0 +1,444 @@
+import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import {
+  Bell,
+  Bitcoin,
+  ChevronRight,
+  Globe,
+  Key,
+  Lock,
+  Monitor,
+  Save,
+  Shield,
+  ShieldCheck,
+  Smartphone,
+  Sliders,
+  User,
+  Wallet,
+} from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+type SettingsSection = "profile" | "security" | "notifications" | "wallets" | "agents" | "display";
+
+const SECTIONS: { id: SettingsSection; label: string; icon: React.ElementType; description: string }[] = [
+  { id: "profile", label: "Profile", icon: User, description: "Manage your identity and account details" },
+  { id: "security", label: "Security", icon: Shield, description: "Passwords, sessions, and access control" },
+  { id: "notifications", label: "Notifications", icon: Bell, description: "Alerts, price notifications, and agent updates" },
+  { id: "wallets", label: "Connected Wallets", icon: Wallet, description: "Manage linked wallet addresses" },
+  { id: "agents", label: "Agent Preferences", icon: Sliders, description: "Configure AI agent behavior and schedules" },
+  { id: "display", label: "Display", icon: Monitor, description: "Theme, layout, and interface preferences" },
+];
+
+function ToggleSwitch({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!enabled)}
+      className={`relative w-10 h-5.5 rounded-full transition-colors duration-200 ${enabled ? "bg-foreground" : "bg-border"}`}
+      style={{ height: "22px", width: "40px" }}
+    >
+      <div
+        className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-background transition-transform duration-200 ${enabled ? "translate-x-[18px]" : "translate-x-0"}`}
+      />
+    </button>
+  );
+}
+
+function SectionNav({
+  active,
+  onSelect,
+}: {
+  active: SettingsSection;
+  onSelect: (s: SettingsSection) => void;
+}) {
+  return (
+    <div className="w-56 shrink-0 border-r border-border">
+      <div className="px-4 py-3 border-b border-border">
+        <div className="mono-label">Settings</div>
+      </div>
+      <nav className="p-2 space-y-0.5">
+        {SECTIONS.map((s) => {
+          const Icon = s.icon;
+          return (
+            <button
+              key={s.id}
+              onClick={() => onSelect(s.id)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md text-sm transition-all text-left ${
+                active === s.id
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+              }`}
+            >
+              <Icon size={14} />
+              <span className="font-medium">{s.label}</span>
+              {active === s.id && <ChevronRight size={11} className="ml-auto text-muted-foreground" />}
+            </button>
+          );
+        })}
+      </nav>
+    </div>
+  );
+}
+
+function ProfileSection() {
+  const { user } = useAuth();
+  const [name, setName] = useState(user?.name ?? "");
+  const updateMutation = trpc.settings.updateProfile.useMutation({
+    onSuccess: () => toast.success("Profile updated"),
+  });
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold mb-1">Profile</h2>
+        <p className="text-xs text-muted-foreground">Manage your account identity and personal information.</p>
+      </div>
+
+      {/* Avatar */}
+      <div className="flex items-center gap-4">
+        <div className="w-14 h-14 rounded-full bg-foreground/10 border border-border flex items-center justify-center">
+          <span className="text-lg font-mono font-semibold">
+            {(user?.name ?? "U").split(" ").map((n) => n[0]).join("").toUpperCase().substring(0, 2)}
+          </span>
+        </div>
+        <div>
+          <div className="text-sm font-medium">{user?.name ?? "Operator"}</div>
+          <div className="text-xs font-mono text-muted-foreground">{user?.email ?? "—"}</div>
+          <button className="text-xs text-muted-foreground hover:text-foreground mt-1 transition-colors">
+            Change avatar
+          </button>
+        </div>
+      </div>
+
+      <div className="aegis-divider" />
+
+      {/* Form */}
+      <div className="space-y-4 max-w-md">
+        <div>
+          <label className="mono-label mb-1.5 block">Display Name</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="bg-input border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring w-full transition-colors"
+          />
+        </div>
+        <div>
+          <label className="mono-label mb-1.5 block">Email Address</label>
+          <input
+            value={user?.email ?? ""}
+            disabled
+            className="bg-muted border border-border rounded-md px-3 py-2 text-sm text-muted-foreground w-full cursor-not-allowed"
+          />
+          <p className="text-[11px] font-mono text-muted-foreground mt-1">From your account session</p>
+        </div>
+        <div>
+          <label className="mono-label mb-1.5 block">Account Role</label>
+          <div className="flex items-center gap-2 px-3 py-2 bg-muted border border-border rounded-md">
+            <ShieldCheck size={13} className="text-muted-foreground" />
+            <span className="text-sm font-mono text-muted-foreground capitalize">{user?.role ?? "user"}</span>
+          </div>
+        </div>
+        <button
+          onClick={() => updateMutation.mutate({ name })}
+          disabled={updateMutation.isPending}
+          className="flex items-center gap-2 px-4 py-2 rounded-md bg-foreground text-background text-xs font-semibold hover:bg-foreground/90 transition-all disabled:opacity-50"
+        >
+          <Save size={12} />
+          Save Changes
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SecuritySection() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold mb-1">Security</h2>
+        <p className="text-xs text-muted-foreground">Manage authentication, sessions, and access controls.</p>
+      </div>
+
+      <div className="space-y-3">
+        {[
+          { icon: Key, label: "Change Password", description: "Update your account password", action: "Configure" },
+          { icon: Smartphone, label: "Two-Factor Authentication", description: "Add an extra layer of security", action: "Enable" },
+          { icon: Lock, label: "Session Management", description: "View and revoke active sessions", action: "Manage" },
+          { icon: Shield, label: "Export Encrypted Backup", description: "Download an encrypted backup of your data", action: "Export" },
+        ].map((item) => {
+          const Icon = item.icon;
+          return (
+            <div key={item.label} className="aegis-card flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-foreground/5 border border-border flex items-center justify-center">
+                  <Icon size={14} className="text-muted-foreground" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium">{item.label}</div>
+                  <div className="text-xs text-muted-foreground">{item.description}</div>
+                </div>
+              </div>
+              <button
+                onClick={() => toast.info("Feature coming soon")}
+                className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
+              >
+                {item.action}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="aegis-divider" />
+
+      <div className="aegis-card">
+        <div className="mono-label mb-3">Security Status</div>
+        <div className="space-y-2">
+          {[
+            { label: "Session auth", status: "Active", ok: true },
+            { label: "Session Encryption", status: "Enabled", ok: true },
+            { label: "E2E Messaging", status: "Active", ok: true },
+            { label: "2FA", status: "Not configured", ok: false },
+          ].map((item) => (
+            <div key={item.label} className="flex items-center justify-between">
+              <span className="text-xs font-mono text-muted-foreground">{item.label}</span>
+              <span className={`text-xs font-mono ${item.ok ? "text-aegis-green" : "text-aegis-gold"}`}>
+                {item.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotificationsSection() {
+  const [prefs, setPrefs] = useState({
+    priceAlerts: true,
+    agentUpdates: true,
+    messages: true,
+    portfolioSummary: false,
+    marketEvents: true,
+    systemAlerts: true,
+  });
+
+  const toggle = (key: keyof typeof prefs) => {
+    setPrefs((p) => ({ ...p, [key]: !p[key] }));
+    toast.success("Notification preference updated");
+  };
+
+  const items = [
+    { key: "priceAlerts" as const, label: "Price Alerts", description: "BTC, ETH, SOL price threshold notifications" },
+    { key: "agentUpdates" as const, label: "Agent Updates", description: "Notifications when AI agents complete analysis" },
+    { key: "messages" as const, label: "New Messages", description: "Encrypted message arrival notifications" },
+    { key: "portfolioSummary" as const, label: "Daily Portfolio Summary", description: "End-of-day portfolio performance report" },
+    { key: "marketEvents" as const, label: "Market Events", description: "Major market events and breaking news" },
+    { key: "systemAlerts" as const, label: "System Alerts", description: "Security and system status notifications" },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold mb-1">Notifications</h2>
+        <p className="text-xs text-muted-foreground">Configure alerts, updates, and notification preferences.</p>
+      </div>
+      <div className="space-y-3">
+        {items.map((item) => (
+          <div key={item.key} className="aegis-card flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium">{item.label}</div>
+              <div className="text-xs text-muted-foreground">{item.description}</div>
+            </div>
+            <ToggleSwitch enabled={prefs[item.key]} onChange={() => toggle(item.key)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WalletsSection() {
+  const WALLETS = [
+    { chain: "BTC", icon: "₿", color: "oklch(0.78 0.12 85)", address: "bc1q0aegisfund0btcwallet0primary0xyzabc", label: "Primary Bitcoin", status: "Connected" },
+    { chain: "ETH", icon: "Ξ", color: "oklch(0.65 0.15 240)", address: "0x0001AegisFundETHWallet1ABCDEF", label: "Primary Ethereum", status: "Connected" },
+    { chain: "SOL", icon: "◎", color: "oklch(0.72 0.12 195)", address: "AegisFund1SolanaWalletAddressXYZ1", label: "Primary Solana", status: "Connected" },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold mb-1">Connected Wallets</h2>
+        <p className="text-xs text-muted-foreground">Manage your linked blockchain wallet addresses.</p>
+      </div>
+      <div className="space-y-3">
+        {WALLETS.map((w) => (
+          <div key={w.chain} className="aegis-card">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-9 h-9 rounded-lg flex items-center justify-center text-base font-bold"
+                  style={{ background: `${w.color}18`, color: w.color }}
+                >
+                  {w.icon}
+                </div>
+                <div>
+                  <div className="text-sm font-medium">{w.label}</div>
+                  <div className="mono-label">{w.chain} Network</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono text-aegis-green">{w.status}</span>
+                <button
+                  onClick={() => toast.info("Feature coming soon")}
+                  className="px-2.5 py-1 rounded border border-border text-[11px] font-mono text-muted-foreground hover:text-foreground transition-all"
+                >
+                  Manage
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-border">
+              <div className="mono-label mb-1">Address</div>
+              <div className="text-xs font-mono text-muted-foreground truncate">{w.address}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={() => toast.info("Feature coming soon")}
+        className="flex items-center gap-2 px-4 py-2 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
+      >
+        <Bitcoin size={12} />
+        Add New Wallet
+      </button>
+    </div>
+  );
+}
+
+function AgentsSection() {
+  const [prefs, setPrefs] = useState({
+    autoRun: false,
+    scheduleDaily: true,
+    detailedOutput: true,
+    alertOnComplete: true,
+  });
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold mb-1">Agent Preferences</h2>
+        <p className="text-xs text-muted-foreground">Configure AI agent behavior, schedules, and output settings.</p>
+      </div>
+      <div className="space-y-3">
+        {[
+          { key: "autoRun" as const, label: "Auto-Run on Login", description: "Automatically activate all agents when you sign in" },
+          { key: "scheduleDaily" as const, label: "Daily Scheduled Analysis", description: "Run all agents once per day at market open" },
+          { key: "detailedOutput" as const, label: "Detailed Structured Output", description: "Show full JSON output from agents" },
+          { key: "alertOnComplete" as const, label: "Alert on Completion", description: "Notify when an agent finishes analysis" },
+        ].map((item) => (
+          <div key={item.key} className="aegis-card flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium">{item.label}</div>
+              <div className="text-xs text-muted-foreground">{item.description}</div>
+            </div>
+            <ToggleSwitch
+              enabled={prefs[item.key]}
+              onChange={() => setPrefs((p) => ({ ...p, [item.key]: !p[item.key] }))}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DisplaySection() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold mb-1">Display</h2>
+        <p className="text-xs text-muted-foreground">Interface appearance and layout preferences.</p>
+      </div>
+      <div className="space-y-4">
+        <div>
+          <div className="mono-label mb-2">Theme</div>
+          <div className="flex gap-3">
+            {["Dark (Default)", "Darker", "Midnight"].map((t, i) => (
+              <button
+                key={t}
+                onClick={() => i === 0 ? null : toast.info("Theme coming soon")}
+                className={`px-4 py-2 rounded-md border text-xs font-mono transition-all ${
+                  i === 0
+                    ? "border-foreground/40 text-foreground bg-foreground/5"
+                    : "border-border text-muted-foreground hover:border-foreground/20"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="mono-label mb-2">Language & Region</div>
+          <div className="flex items-center gap-2 px-3 py-2 bg-muted border border-border rounded-md max-w-xs">
+            <Globe size={13} className="text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">English (US) · UTC</span>
+          </div>
+        </div>
+        <div>
+          <div className="mono-label mb-2">Data Refresh Interval</div>
+          <div className="flex gap-2">
+            {["30s", "1m", "5m", "15m"].map((t, i) => (
+              <button
+                key={t}
+                onClick={() => i !== 1 ? toast.info("Coming soon") : null}
+                className={`px-3 py-1.5 rounded border text-xs font-mono transition-all ${
+                  i === 1
+                    ? "border-foreground/40 text-foreground"
+                    : "border-border text-muted-foreground hover:border-foreground/20"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function SettingsPage() {
+  const [activeSection, setActiveSection] = useState<SettingsSection>("profile");
+
+  const renderSection = () => {
+    switch (activeSection) {
+      case "profile": return <ProfileSection />;
+      case "security": return <SecuritySection />;
+      case "notifications": return <NotificationsSection />;
+      case "wallets": return <WalletsSection />;
+      case "agents": return <AgentsSection />;
+      case "display": return <DisplaySection />;
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col animate-fade-up">
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-border shrink-0">
+        <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+        <p className="text-xs text-muted-foreground font-mono mt-0.5">
+          Account, security, and platform configuration
+        </p>
+      </div>
+
+      {/* Body */}
+      <div className="flex flex-1 overflow-hidden">
+        <SectionNav active={activeSection} onSelect={setActiveSection} />
+        <div className="flex-1 overflow-y-auto p-6">
+          {renderSection()}
+        </div>
+      </div>
+    </div>
+  );
+}
