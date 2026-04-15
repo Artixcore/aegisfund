@@ -2,6 +2,14 @@
 <html lang="en" class="dark">
 
   <head>
+    <!-- Sync shim before any module: bundled libs (e.g. @solana/web3.js) may read `process` before main.tsx runs. -->
+    <script>
+      (function () {
+        if (typeof globalThis === "undefined") return;
+        if (globalThis.process && globalThis.process.env) return;
+        globalThis.process = { env: {}, browser: true, version: "", versions: {} };
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
     <title>Aegis Fund — Institutional Intelligence Terminal</title>

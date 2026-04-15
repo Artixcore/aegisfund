@@ -1,4 +1,5 @@
 import { callDataApi } from "./_core/dataApi";
+import { ENV } from "./_core/env";
 
 export type CryptoSpotRow = {
   symbol: string;
@@ -11,8 +12,24 @@ export type CryptoSpotRow = {
   sparkline: number[];
 };
 
+function emptySpotRow(key: string): CryptoSpotRow {
+  return { symbol: key, price: 0, change24h: 0, changePct24h: 0, high24h: 0, low24h: 0, volume24h: 0, sparkline: [] };
+}
+
+let loggedDataGatewayMissing = false;
+
 /** BTC / ETH / SOL spot rows keyed by chain ticker (for Yahoo `BTC-USD` style). */
 export async function fetchCryptoSpotPrices(): Promise<Record<string, CryptoSpotRow>> {
+  if (!ENV.dataServiceBaseUrl.trim() || !ENV.dataServiceApiKey.trim()) {
+    if (!loggedDataGatewayMissing) {
+      loggedDataGatewayMissing = true;
+      console.warn(
+        "[Prices] Data gateway not configured (set AEGIS_DATA_API_URL and AEGIS_DATA_API_KEY). Using zero spot prices until then.",
+      );
+    }
+    return { BTC: emptySpotRow("BTC"), ETH: emptySpotRow("ETH"), SOL: emptySpotRow("SOL") };
+  }
+
   const symbols = [
     { symbol: "BTC-USD", key: "BTC" },
     { symbol: "ETH-USD", key: "ETH" },

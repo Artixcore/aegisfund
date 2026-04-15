@@ -1,3 +1,7 @@
+/** Browser shim: @solana/web3.js and transitive deps reference Node's `process`. */
+import process from "process";
+(globalThis as unknown as { process: typeof process }).process = process;
+
 import { trpc } from "@/lib/trpc";
 import { UNAUTHED_ERR_MSG } from '@shared/const';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

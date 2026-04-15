@@ -6,7 +6,11 @@ import { defineConfig } from "vite";
 
 const plugins = [react(), tailwindcss(), jsxLocPlugin()];
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  define: {
+    global: "globalThis",
+    "process.env.NODE_ENV": JSON.stringify(mode === "production" ? "production" : "development"),
+  },
   plugins,
   resolve: {
     alias: {
@@ -30,4 +34,4 @@ export default defineConfig({
       deny: ["**/.*"],
     },
   },
-});
+}));
