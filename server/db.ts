@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { createPool } from "mysql2";
 import {
   InsertUser,
   agentRuns,
@@ -14,16 +15,24 @@ import {
   wallets,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { resolveMysqlPoolOptions } from "../shared/mysqlUrl";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+let _lastConnectErrorKey: string | null = null;
 
 export async function getDb() {
-  const url = ENV.databaseUrl;
-  if (!_db && url) {
+  const opts = resolveMysqlPoolOptions();
+  if (!_db && opts) {
     try {
-      _db = drizzle(url);
+      const pool = createPool(opts);
+      _db = drizzle(pool);
+      _lastConnectErrorKey = null;
     } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
+      const key = error instanceof Error ? error.message : String(error);
+      if (_lastConnectErrorKey !== key) {
+        console.warn("[Database] Failed to connect:", error);
+        _lastConnectErrorKey = key;
+      }
       _db = null;
     }
   }

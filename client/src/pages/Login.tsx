@@ -311,12 +311,18 @@ export default function Login() {
         </Tabs>
 
         {import.meta.env.DEV ? (
-          <p className="text-[11px] font-mono text-muted-foreground text-center">
-            Dev shortcut:{" "}
-            <a className="underline hover:text-foreground" href="/api/auth/dev-login?redirect=/dashboard">
-              dev-login
-            </a>{" "}
-            (requires AUTH_DEV_LOGIN)
+          <p className="text-[11px] font-mono text-muted-foreground text-center space-x-2">
+            <span>
+              Dev shortcut:{" "}
+              <a className="underline hover:text-foreground" href="/api/auth/dev-login?redirect=/dashboard">
+                dev-login
+              </a>{" "}
+              (requires AUTH_DEV_LOGIN)
+            </span>
+            <span aria-hidden="true">·</span>
+            <a className="underline hover:text-foreground" href="/api/version" target="_blank" rel="noreferrer">
+              API version
+            </a>
           </p>
         ) : null}
       </div>

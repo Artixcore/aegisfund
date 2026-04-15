@@ -4,6 +4,7 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerAuthRoutes } from "./authRoutes";
+import { getServerBuildInfo } from "./buildInfo";
 import { appRouter, startBackgroundServices } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -51,9 +52,20 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerAuthRoutes(app);
+
+  const buildInfo = getServerBuildInfo();
+  app.get("/api/version", (_req, res) => {
+    res.setHeader("X-Aegis-App-Version", buildInfo.version);
+    res.json(buildInfo);
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",
+    (req, res, next) => {
+      res.setHeader("X-Aegis-App-Version", buildInfo.version);
+      next();
+    },
     createExpressMiddleware({
       router: appRouter,
       createContext,
