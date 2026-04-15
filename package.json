@@ -15,8 +15,8 @@
     "db:up": "node scripts/db-up.mjs",
     "db:up:docker": "docker compose up -d mysql",
     "db:ensure": "node scripts/ensure-db.mjs",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate"
+    "db:migrate": "node ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:push": "node ./node_modules/drizzle-kit/bin.cjs generate && node ./node_modules/drizzle-kit/bin.cjs migrate"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
