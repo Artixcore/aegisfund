@@ -32,8 +32,9 @@ async function main() {
     const u = new URL(direct.replace(/^mysql:\/\//, "http://"));
     host = u.hostname;
     port = Number(u.port || 3306);
-    user = decodeURIComponent(u.username);
-    password = decodeURIComponent(u.password);
+    // WHATWG URL already decodes userinfo; do not decodeURIComponent again (throws on e.g. "100%" in password).
+    user = u.username;
+    password = u.password;
     database = name;
   }
 
