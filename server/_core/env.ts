@@ -1,8 +1,19 @@
+import { resolveMysqlDatabaseUrl } from "../../shared/mysqlUrl";
+
+function databaseUrlOrEmpty(): string {
+  try {
+    if (!process.env.DATABASE_URL?.trim() && !process.env.DB_HOST?.trim()) return "";
+    return resolveMysqlDatabaseUrl();
+  } catch {
+    return "";
+  }
+}
+
 export const ENV = {
   cookieSecret: process.env.JWT_SECRET ?? "",
   /** Issuer claim for session JWTs (sub = openId). */
   sessionIssuer: process.env.JWT_ISSUER ?? "aegis-fund",
-  databaseUrl: process.env.DATABASE_URL ?? "",
+  databaseUrl: databaseUrlOrEmpty(),
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   isProduction: process.env.NODE_ENV === "production",
 

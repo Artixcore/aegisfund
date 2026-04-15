@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { COOKIE_NAME, DAPP_UNKNOWN_ACCOUNT_MSG, ONE_YEAR_MS } from "@shared/const";
 import { ed25519KeyHex64Schema, ed25519SignatureHex128Schema } from "@shared/dappAuth";
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
@@ -65,6 +65,7 @@ import {
   insertAuditLog,
   recordMessagingIdentityBinding,
   getMessagingIdentitiesByUserId,
+  getDb,
   getUserByOpenId,
   hasUserRegisteredFromIp,
   upsertUser,
@@ -858,6 +859,13 @@ export const appRouter = router({
             message: "JWT_SECRET is not configured",
           });
         }
+        if (!(await getDb())) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "Database is not configured. Set DATABASE_URL (see .env.example), run db:migrate, then try again.",
+          });
+        }
         try {
           assertValidEd25519PublicKeyHex(input.publicKeyHex);
         } catch {
@@ -906,8 +914,8 @@ export const appRouter = router({
         const user = await getUserByOpenId(input.publicKeyHex);
         if (!user) {
           throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Unknown account",
+            code: "BAD_REQUEST",
+            message: DAPP_UNKNOWN_ACCOUNT_MSG,
           });
         }
         return createLoginChallengeJwt(input.publicKeyHex);
@@ -956,8 +964,8 @@ export const appRouter = router({
         const user = await getUserByOpenId(verified.publicKeyHex);
         if (!user) {
           throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Unknown account",
+            code: "BAD_REQUEST",
+            message: DAPP_UNKNOWN_ACCOUNT_MSG,
           });
         }
 

@@ -10,6 +10,7 @@ import {
   signUtf8MessageHex,
 } from "@/lib/dappAuth";
 import { trpc } from "@/lib/trpc";
+import { DAPP_UNKNOWN_ACCOUNT_MSG } from "@shared/const";
 import { ed25519KeyHex64Schema } from "@shared/dappAuth";
 import { TRPCClientError } from "@trpc/client";
 import { Copy, Shield } from "lucide-react";
@@ -219,7 +220,20 @@ export default function Login() {
                 />
               </div>
               {signInError ? (
-                <p className="text-sm text-destructive">{signInError}</p>
+                <div className="space-y-2">
+                  <p className="text-sm text-destructive">{signInError}</p>
+                  {!hideCreate && signInError === DAPP_UNKNOWN_ACCOUNT_MSG ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => setTab("create")}
+                    >
+                      Go to Create account
+                    </Button>
+                  ) : null}
+                </div>
               ) : null}
               <Button type="submit" className="w-full" disabled={signInBusy}>
                 {signInBusy ? "Signing in…" : "Sign in"}

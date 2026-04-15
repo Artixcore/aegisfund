@@ -14,6 +14,7 @@
     "relay": "tsx relay/server.ts",
     "db:up": "node scripts/db-up.mjs",
     "db:up:docker": "docker compose up -d mysql",
+    "db:ensure": "node scripts/ensure-db.mjs",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },

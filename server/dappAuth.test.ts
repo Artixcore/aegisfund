@@ -1,5 +1,6 @@
 import * as ed25519 from "@noble/ed25519";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DAPP_UNKNOWN_ACCOUNT_MSG } from "@shared/const";
 import { bytesToHex, hexToBytes } from "@shared/dappAuth";
 import type { TrpcContext } from "./_core/context";
 import { appRouter } from "./routers";
@@ -9,6 +10,7 @@ const hoisted = vi.hoisted(() => ({
   getUserByOpenId: vi.fn<[], Promise<User | undefined>>(),
   upsertUser: vi.fn<[], Promise<void>>(),
   hasUserRegisteredFromIp: vi.fn<[], Promise<boolean>>(),
+  getDb: vi.fn<[], Promise<Record<string, never> | null>>(),
 }));
 
 vi.mock("./db", async (importOriginal) => {
@@ -18,6 +20,7 @@ vi.mock("./db", async (importOriginal) => {
     getUserByOpenId: hoisted.getUserByOpenId,
     upsertUser: hoisted.upsertUser,
     hasUserRegisteredFromIp: hoisted.hasUserRegisteredFromIp,
+    getDb: hoisted.getDb,
   };
 });
 
@@ -63,6 +66,7 @@ function createCtx(opts?: {
 describe("auth.registerDapp", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hoisted.getDb.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -120,6 +124,21 @@ describe("auth.registerDapp", () => {
     });
   });
 
+  it("fails when database is not configured", async () => {
+    hoisted.getDb.mockResolvedValue(null);
+
+    const priv = ed25519.utils.randomPrivateKey();
+    const pub = await ed25519.getPublicKeyAsync(priv);
+    const publicKeyHex = bytesToHex(pub);
+
+    const { ctx } = createCtx();
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.auth.registerDapp({ publicKeyHex })).rejects.toMatchObject({
+      code: "INTERNAL_SERVER_ERROR",
+    });
+    expect(hoisted.upsertUser).not.toHaveBeenCalled();
+  });
+
   it("forbids second registration from same IP", async () => {
     const priv = ed25519.utils.randomPrivateKey();
     const pub = await ed25519.getPublicKeyAsync(priv);
@@ -142,6 +161,7 @@ describe("auth.loginChallenge + loginWithSignature", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    hoisted.getDb.mockResolvedValue({});
     const priv = ed25519.utils.randomPrivateKey();
     const pub = await ed25519.getPublicKeyAsync(priv);
     publicKeyHex = bytesToHex(pub);
@@ -156,6 +176,16 @@ describe("auth.loginChallenge + loginWithSignature", () => {
     expect(ch.challengeToken.length).toBeGreaterThan(20);
     expect(ch.message).toContain("Aegis Fund login");
     expect(ch.message).toContain(publicKeyHex);
+  });
+
+  it("rejects sign-in for an unknown public key", async () => {
+    hoisted.getUserByOpenId.mockResolvedValue(undefined);
+    const { ctx } = createCtx();
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.auth.loginChallenge({ publicKeyHex })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: DAPP_UNKNOWN_ACCOUNT_MSG,
+    });
   });
 
   it("sets session cookie on valid signature", async () => {

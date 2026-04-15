@@ -18,9 +18,10 @@ import { ENV } from "./_core/env";
 let _db: ReturnType<typeof drizzle> | null = null;
 
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  const url = ENV.databaseUrl;
+  if (!_db && url) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _db = drizzle(url);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -36,7 +37,9 @@ export async function getDb() {
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();
-  if (!db) { console.warn("[Database] Cannot upsert user: database not available"); return; }
+  if (!db) {
+    throw new Error("Database not configured or unavailable");
+  }
 
   try {
     const values: InsertUser = { openId: user.openId };
