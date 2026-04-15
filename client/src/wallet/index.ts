@@ -6,6 +6,7 @@ export * from "./derive";
 export * from "./chains";
 export { ethereumAdapter, ethJsonRpc } from "./ethereum";
 export { bitcoinAdapter, fetchBtcFeeRateSatPerVb, planBtcSpend } from "./bitcoin";
+export { solanaAdapter, solJsonRpc, parseSolDecimalToLamports } from "./solana";
 export type { BtcSpendPlan } from "./bitcoin";
 
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";

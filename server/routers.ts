@@ -22,6 +22,7 @@ import { ENV } from "./_core/env";
 import { sdk } from "./_core/sdk";
 import { storagePut } from "./storage";
 import { fetchBtcBalance, fetchEthBalance, fetchSolBalance } from "./blockchain";
+import { fetchCryptoSpotPrices, fetchCryptoSpotPriceMap } from "./cryptoPrices";
 import { getBtcRestApiBase, getEthRpcUrl, getSolRpcUrl } from "./wallet/chainEndpoints";
 import {
   createAgentRun,
@@ -46,8 +47,6 @@ import {
   updateAgentRun,
   updateScheduleAfterRun,
   upsertAgentSchedule,
-  upsertDefaultConversations,
-  upsertDefaultWallets,
   upsertWallet,
   getKycProfile,
   upsertKycProfile,
@@ -165,17 +164,7 @@ async function runAgentScheduler() {
 // ============================================================
 async function runPortfolioSnapshots() {
   try {
-    // Fetch current prices
-    const priceMap: Record<string, number> = {};
-    for (const sym of ["BTC", "ETH", "SOL"]) {
-      try {
-        const resp = await callDataApi("YahooFinance/get_stock_chart", {
-          query: { symbol: `${sym}-USD`, interval: "1h", range: "1d" },
-        }) as { chart?: { result?: Array<{ meta?: { regularMarketPrice?: number } }> } };
-        const price = resp?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
-        priceMap[sym] = price;
-      } catch { /* skip */ }
-    }
+    const priceMap = await fetchCryptoSpotPriceMap();
     if (!priceMap["BTC"] && !priceMap["ETH"] && !priceMap["SOL"]) return; // no prices available
 
     // Get all wallets grouped by userId
@@ -240,72 +229,7 @@ export function startBackgroundServices() {
 const pricesRouter = router({
   getCryptoPrices: publicProcedure.query(async () => {
     try {
-      const symbols = [
-        { symbol: "BTC-USD", key: "BTC" },
-        { symbol: "ETH-USD", key: "ETH" },
-        { symbol: "SOL-USD", key: "SOL" },
-      ];
-
-      const results: Record<string, {
-        price: number;
-        change24h: number;
-        changePct24h: number;
-        high24h: number;
-        low24h: number;
-        volume24h: number;
-        sparkline: number[];
-        symbol: string;
-      }> = {};
-
-      for (const { symbol, key } of symbols) {
-        try {
-          const response = await callDataApi("YahooFinance/get_stock_chart", {
-            query: { symbol, interval: "1h", range: "5d" },
-          }) as {
-            chart?: {
-              result?: Array<{
-                meta?: {
-                  regularMarketPrice?: number;
-                  chartPreviousClose?: number;
-                  regularMarketDayHigh?: number;
-                  regularMarketDayLow?: number;
-                  regularMarketVolume?: number;
-                };
-                indicators?: {
-                  quote?: Array<{ close?: (number | null)[] }>;
-                };
-              }>;
-            };
-          };
-
-          const result = response?.chart?.result?.[0];
-          const meta = result?.meta;
-          const closes = result?.indicators?.quote?.[0]?.close ?? [];
-          const sparkline = closes
-            .filter((v): v is number => v !== null && v !== undefined)
-            .slice(-24);
-
-          const price = meta?.regularMarketPrice ?? 0;
-          const prevClose = meta?.chartPreviousClose ?? price;
-          const change24h = price - prevClose;
-          const changePct24h = prevClose !== 0 ? (change24h / prevClose) * 100 : 0;
-
-          results[key] = {
-            symbol: key,
-            price,
-            change24h,
-            changePct24h,
-            high24h: meta?.regularMarketDayHigh ?? price,
-            low24h: meta?.regularMarketDayLow ?? price,
-            volume24h: meta?.regularMarketVolume ?? 0,
-            sparkline,
-          };
-        } catch (err) {
-          console.error(`[Prices] Failed to fetch ${symbol}:`, err);
-          results[key] = { symbol: key, price: 0, change24h: 0, changePct24h: 0, high24h: 0, low24h: 0, volume24h: 0, sparkline: [] };
-        }
-      }
-      return results;
+      return await fetchCryptoSpotPrices();
     } catch (error) {
       throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to fetch prices" });
     }
@@ -319,7 +243,6 @@ const walletRouter = router({
   /** Non-secret hints for clients / ops (no API keys exposed). */
   getChainInfrastructure: protectedProcedure.query(() => {
     return {
-      demoWalletSeeding: ENV.demoWalletSeeding,
       btcRestUsesCustomBase: Boolean(ENV.btcRestApiBase?.trim()),
       ethUsesSelfHostedRpc: Boolean(getEthRpcUrl()),
       solUsesSelfHostedRpc: Boolean(ENV.solRpcUrl?.trim()),
@@ -329,7 +252,6 @@ const walletRouter = router({
   }),
 
   getWallets: protectedProcedure.query(async ({ ctx }) => {
-    await upsertDefaultWallets(ctx.user.id);
     return getWalletsByUserId(ctx.user.id);
   }),
 
@@ -397,7 +319,6 @@ const ciphertextEnvelopeSchema = z.object({
 
 const messagesRouter = router({
   getConversations: protectedProcedure.query(async ({ ctx }) => {
-    await upsertDefaultConversations(ctx.user.id);
     return getConversationsByUserId(ctx.user.id);
   }),
 
@@ -460,6 +381,12 @@ const messagesRouter = router({
       { message: "With ciphertextEnvelope, content must be a short placeholder only" },
     ))
     .mutation(async ({ ctx, input }) => {
+      if (ENV.messagesRequireCiphertext && !input.ciphertextEnvelope) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Encrypted payload (ciphertextEnvelope) is required for relay messages in this environment.",
+        });
+      }
       await createMessage({
         conversationId: input.conversationId,
         senderId: ctx.user.id,
@@ -586,40 +513,79 @@ const alertsRouter = router({
     }),
 });
 
+async function buildPortfolioSummaryForUser(userId: number) {
+  const snapshot = await getLatestPortfolioSnapshot(userId);
+  const userWallets = await getWalletsByUserId(userId);
+  const prices = await fetchCryptoSpotPrices();
+
+  const addresses: Partial<Record<"BTC" | "ETH" | "SOL", string>> = {};
+  for (const w of userWallets) {
+    addresses[w.chain] = w.address;
+  }
+
+  const [btcBal, ethBal, solBal] = await Promise.all([
+    addresses.BTC ? fetchBtcBalance(addresses.BTC) : Promise.resolve({ balance: 0, address: "" }),
+    addresses.ETH ? fetchEthBalance(addresses.ETH) : Promise.resolve({ balance: 0, address: "" }),
+    addresses.SOL ? fetchSolBalance(addresses.SOL) : Promise.resolve({ balance: 0, address: "" }),
+  ]);
+
+  const pBtc = prices.BTC?.price ?? 0;
+  const pEth = prices.ETH?.price ?? 0;
+  const pSol = prices.SOL?.price ?? 0;
+  const pctBtc = prices.BTC?.changePct24h ?? 0;
+  const pctEth = prices.ETH?.changePct24h ?? 0;
+  const pctSol = prices.SOL?.changePct24h ?? 0;
+
+  const btcBalance = btcBal.balance;
+  const ethBalance = ethBal.balance;
+  const solBalance = solBal.balance;
+
+  const btcUsd = btcBalance * pBtc;
+  const ethUsd = ethBalance * pEth;
+  const solUsd = solBalance * pSol;
+  const totalValueUsd = btcUsd + ethUsd + solUsd;
+
+  const priorMultiplier = (pct: number) => {
+    if (!Number.isFinite(pct) || pct <= -100) return 0;
+    return 1 / (1 + pct / 100);
+  };
+  const valueYesterday =
+    btcBalance * pBtc * priorMultiplier(pctBtc) +
+    ethBalance * pEth * priorMultiplier(pctEth) +
+    solBalance * pSol * priorMultiplier(pctSol);
+  const change24h = totalValueUsd - valueYesterday;
+  const changePct24h = valueYesterday > 0 ? (change24h / valueYesterday) * 100 : 0;
+
+  const allocationBtc = totalValueUsd > 0 ? (btcUsd / totalValueUsd) * 100 : 0;
+  const allocationEth = totalValueUsd > 0 ? (ethUsd / totalValueUsd) * 100 : 0;
+  const allocationSol = totalValueUsd > 0 ? (solUsd / totalValueUsd) * 100 : 0;
+
+  return {
+    totalValueUsd: Math.round(totalValueUsd * 100) / 100,
+    change24h: Math.round(change24h * 100) / 100,
+    changePct24h: Math.round(changePct24h * 100) / 100,
+    btcBalance,
+    ethBalance,
+    solBalance,
+    allocationBtc: Math.round(allocationBtc * 10) / 10,
+    allocationEth: Math.round(allocationEth * 10) / 10,
+    allocationSol: Math.round(allocationSol * 10) / 10,
+    snapshot,
+  };
+}
+
 // ============================================================
 // PORTFOLIO ROUTER
 // ============================================================
 const portfolioRouter = router({
   getSummary: protectedProcedure.query(async ({ ctx }) => {
-    const snapshot = await getLatestPortfolioSnapshot(ctx.user.id);
-    return {
-      totalValueUsd: 284750.42,
-      change24h: 8234.18,
-      changePct24h: 2.98,
-      btcBalance: 2.4821,
-      ethBalance: 18.3402,
-      solBalance: 412.88,
-      allocationBtc: 52.3,
-      allocationEth: 31.1,
-      allocationSol: 16.6,
-      snapshot,
-    };
+    return buildPortfolioSummaryForUser(ctx.user.id);
   }),
 
   getHistory: protectedProcedure
     .input(z.object({ days: z.number().min(1).max(90).default(30) }))
     .query(async ({ ctx, input }) => {
       const rows = await getPortfolioHistory(ctx.user.id, input.days);
-      // If no real history, generate synthetic 30-day demo data
-      if (rows.length < 3) {
-        const now = Date.now();
-        const base = 240000;
-        return Array.from({ length: 30 }, (_, i) => {
-          const t = now - (29 - i) * 24 * 60 * 60 * 1000;
-          const noise = (Math.sin(i * 0.7) * 12000) + (Math.cos(i * 1.3) * 8000) + (i * 1500);
-          return { snapshotAt: new Date(t), totalValueUsd: Math.round(base + noise) };
-        });
-      }
       return rows.map((r) => ({ snapshotAt: r.snapshotAt, totalValueUsd: r.totalValueUsd ?? 0 }));
     }),
 

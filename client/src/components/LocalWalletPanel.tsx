@@ -6,6 +6,7 @@ import {
   DEFAULT_WALLET_SETTINGS,
   deleteVault,
   ethereumAdapter,
+  solanaAdapter,
   generateWalletMnemonic12,
   getVaultWrapped,
   getWalletSettings,
@@ -29,15 +30,20 @@ import QRCode from "qrcode";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
-function explorerTxUrl(chain: "ethereum" | "bitcoin", txHash: string, settings: WalletSettings): string {
+function explorerTxUrl(chain: "ethereum" | "bitcoin" | "solana", txHash: string, settings: WalletSettings): string {
   if (chain === "ethereum") {
     return settings.ethNetwork === "sepolia"
       ? `https://sepolia.etherscan.io/tx/${txHash}`
       : `https://etherscan.io/tx/${txHash}`;
   }
-  return settings.btcNetwork === "testnet"
-    ? `https://blockstream.info/testnet/tx/${txHash}`
-    : `https://blockstream.info/tx/${txHash}`;
+  if (chain === "bitcoin") {
+    return settings.btcNetwork === "testnet"
+      ? `https://blockstream.info/testnet/tx/${txHash}`
+      : `https://blockstream.info/tx/${txHash}`;
+  }
+  return settings.solNetwork === "devnet"
+    ? `https://solscan.io/tx/${txHash}?cluster=devnet`
+    : `https://solscan.io/tx/${txHash}`;
 }
 
 export default function LocalWalletPanel() {
@@ -50,10 +56,11 @@ export default function LocalWalletPanel() {
   const [importMnemonic, setImportMnemonic] = useState("");
   const [phase, setPhase] = useState<"none" | "create" | "import">("none");
   const [busy, setBusy] = useState(false);
-  const [balances, setBalances] = useState<{ eth?: string; btc?: string; err?: string }>({});
-  const [addrs, setAddrs] = useState<{ ethereum?: string; bitcoin?: string }>({});
+  const [balances, setBalances] = useState<{ eth?: string; btc?: string; sol?: string; err?: string }>({});
+  const [addrs, setAddrs] = useState<{ ethereum?: string; bitcoin?: string; solana?: string }>({});
   const [qrEth, setQrEth] = useState<string | null>(null);
-  const [sendChain, setSendChain] = useState<"ethereum" | "bitcoin">("ethereum");
+  const [qrSol, setQrSol] = useState<string | null>(null);
+  const [sendChain, setSendChain] = useState<"ethereum" | "bitcoin" | "solana">("ethereum");
   const [sendTo, setSendTo] = useState("");
   const [sendAmt, setSendAmt] = useState("");
   const [feeHint, setFeeHint] = useState("");
@@ -95,11 +102,24 @@ export default function LocalWalletPanel() {
       const s = await getWalletSettings(wdb);
       const ethB = await ethereumAdapter.getBalance(m, s.accountIndex, s);
       const btcB = await bitcoinAdapter.getBalance(m, s.accountIndex, s);
+      let solFormatted = "—";
+      try {
+        if (s.solRpcUrl.trim()) {
+          const solB = await solanaAdapter.getBalance(m, s.accountIndex, s);
+          solFormatted = solB.formatted;
+        }
+      } catch {
+        solFormatted = "—";
+      }
       const a = await addressesForSettings(m, s);
-      setAddrs({ ethereum: a.ethereum, bitcoin: a.bitcoin });
-      setBalances({ eth: ethB.formatted, btc: btcB.formatted });
+      setAddrs({ ethereum: a.ethereum, bitcoin: a.bitcoin, solana: a.solana });
+      setBalances({ eth: ethB.formatted, btc: btcB.formatted, sol: solFormatted });
       const ethQr = await QRCode.toDataURL(a.ethereum, { width: 160, margin: 1, errorCorrectionLevel: "M" });
       setQrEth(ethQr);
+      if (a.solana) {
+        const solQr = await QRCode.toDataURL(a.solana, { width: 160, margin: 1, errorCorrectionLevel: "M" });
+        setQrSol(solQr);
+      } else setQrSol(null);
     } catch (e) {
       setBalances({ err: String(e) });
     } finally {
@@ -209,6 +229,7 @@ export default function LocalWalletPanel() {
     setBalances({});
     setAddrs({});
     setQrEth(null);
+    setQrSol(null);
     toast.message("Session cleared — passphrase required again to sign");
   };
 
@@ -221,6 +242,7 @@ export default function LocalWalletPanel() {
     setBalances({});
     setAddrs({});
     setQrEth(null);
+    setQrSol(null);
     toast.success("Local vault removed");
   };
 
@@ -234,8 +256,11 @@ export default function LocalWalletPanel() {
       if (sendChain === "ethereum") {
         const r = await ethereumAdapter.estimateNativeSendFee(m, s.accountIndex, s, sendTo.trim(), sendAmt.trim());
         setFeeHint(r.display);
-      } else {
+      } else if (sendChain === "bitcoin") {
         const r = await bitcoinAdapter.estimateNativeSendFee(m, s.accountIndex, s, sendTo.trim(), sendAmt.trim());
+        setFeeHint(r.display);
+      } else {
+        const r = await solanaAdapter.estimateNativeSendFee(m, s.accountIndex, s, sendTo.trim(), sendAmt.trim());
         setFeeHint(r.display);
       }
     } catch (e) {
@@ -250,17 +275,22 @@ export default function LocalWalletPanel() {
     if (!m || !wdb || !sendTo.trim() || !sendAmt.trim()) return;
     const s = await getWalletSettings(wdb);
     setBusy(true);
+    const chainParams = {
+      mnemonic: m,
+      accountIndex: s.accountIndex,
+      to: sendTo.trim(),
+      ethRpcUrl: s.ethRpcUrl,
+      ethNetwork: s.ethNetwork,
+      btcEsploraBase: s.btcEsploraBase,
+      btcNetwork: s.btcNetwork,
+      solRpcUrl: s.solRpcUrl,
+      solNetwork: s.solNetwork,
+    };
     try {
       if (sendChain === "ethereum") {
         const res = await ethereumAdapter.signAndBroadcastNativeSend({
-          mnemonic: m,
-          accountIndex: s.accountIndex,
-          to: sendTo.trim(),
+          ...chainParams,
           amountEthDecimal: sendAmt.trim(),
-          ethRpcUrl: s.ethRpcUrl,
-          ethNetwork: s.ethNetwork,
-          btcEsploraBase: s.btcEsploraBase,
-          btcNetwork: s.btcNetwork,
         });
         await putLocalTx(wdb, {
           id: crypto.randomUUID(),
@@ -272,23 +302,32 @@ export default function LocalWalletPanel() {
           ts: Date.now(),
         });
         toast.success(`Broadcast: ${res.txHash}`);
-      } else {
+      } else if (sendChain === "bitcoin") {
         const sats = String(Math.round(Number(sendAmt) * 1e8));
         const res = await bitcoinAdapter.signAndBroadcastNativeSend({
-          mnemonic: m,
-          accountIndex: s.accountIndex,
-          to: sendTo.trim(),
+          ...chainParams,
           amountSats: sats,
-          ethRpcUrl: s.ethRpcUrl,
-          ethNetwork: s.ethNetwork,
-          btcEsploraBase: s.btcEsploraBase,
-          btcNetwork: s.btcNetwork,
         });
         await putLocalTx(wdb, {
           id: crypto.randomUUID(),
           chain: "bitcoin",
           txHash: res.txHash,
           amountDisplay: `${sendAmt} BTC`,
+          to: sendTo.trim(),
+          status: "pending",
+          ts: Date.now(),
+        });
+        toast.success(`Broadcast: ${res.txHash}`);
+      } else {
+        const res = await solanaAdapter.signAndBroadcastNativeSend({
+          ...chainParams,
+          amountSolDecimal: sendAmt.trim(),
+        });
+        await putLocalTx(wdb, {
+          id: crypto.randomUUID(),
+          chain: "solana",
+          txHash: res.txHash,
+          amountDisplay: `${sendAmt.trim()} SOL`,
           to: sendTo.trim(),
           status: "pending",
           ts: Date.now(),
@@ -322,8 +361,8 @@ export default function LocalWalletPanel() {
           <span className="text-sm font-semibold">Non-custodial · browser-only chain access</span>
         </div>
         <p className="text-xs text-muted-foreground font-mono leading-relaxed">
-          Your mnemonic is encrypted locally and never sent to Aegis servers. Set JSON-RPC and Esplora URLs that allow browser CORS (often a
-          self-hosted node or tunnel). See docs/LOCAL_WALLET.md.
+          Your mnemonic is encrypted locally and never sent to Aegis servers. Set JSON-RPC (ETH, SOL) and Esplora (BTC) URLs that allow browser
+          CORS (often a self-hosted node or tunnel). See docs/LOCAL_WALLET.md.
         </p>
       </div>
 
@@ -407,6 +446,10 @@ export default function LocalWalletPanel() {
               <Label className="text-xs font-mono">BTC Esplora base</Label>
               <Input className="font-mono text-xs" value={settings.btcEsploraBase} onChange={(e) => setSettings({ ...settings, btcEsploraBase: e.target.value })} />
             </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-mono">SOL JSON-RPC (CORS must allow this origin)</Label>
+              <Input className="font-mono text-xs" value={settings.solRpcUrl} onChange={(e) => setSettings({ ...settings, solRpcUrl: e.target.value })} placeholder="https://…" />
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs font-mono">ETH network</Label>
@@ -428,6 +471,17 @@ export default function LocalWalletPanel() {
                 >
                   <option value="mainnet">mainnet</option>
                   <option value="testnet">testnet</option>
+                </select>
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs font-mono">SOL cluster</Label>
+                <select
+                  className="w-full h-8 text-xs bg-muted border border-border rounded-md px-2"
+                  value={settings.solNetwork}
+                  onChange={(e) => setSettings({ ...settings, solNetwork: e.target.value as WalletSettings["solNetwork"] })}
+                >
+                  <option value="mainnet-beta">mainnet-beta</option>
+                  <option value="devnet">devnet</option>
                 </select>
               </div>
             </div>
@@ -455,7 +509,7 @@ export default function LocalWalletPanel() {
                 </Button>
               </div>
               {balances.err && <p className="text-xs text-destructive font-mono">{balances.err}</p>}
-              <div className="grid md:grid-cols-2 gap-4 text-xs font-mono">
+              <div className="grid md:grid-cols-3 gap-4 text-xs font-mono">
                 <div>
                   <div className="text-muted-foreground mb-1">Ethereum</div>
                   <div className="break-all">{addrs.ethereum ?? "—"}</div>
@@ -475,11 +529,35 @@ export default function LocalWalletPanel() {
                   <div className="break-all">{addrs.bitcoin ?? "—"}</div>
                   <div className="text-aegis-green mt-1">{balances.btc ?? "—"}</div>
                 </div>
+                <div>
+                  <div className="text-muted-foreground mb-1">Solana</div>
+                  <div className="break-all">{addrs.solana ?? "—"}</div>
+                  <div className="text-aegis-green mt-1">{balances.sol ?? "—"}</div>
+                  {addrs.solana && (
+                    <button
+                      type="button"
+                      className="mt-1 text-muted-foreground hover:text-foreground"
+                      onClick={() => void navigator.clipboard.writeText(addrs.solana!)}
+                    >
+                      <Copy size={12} className="inline" /> copy
+                    </button>
+                  )}
+                </div>
               </div>
-              {qrEth && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <QrCode size={14} />
-                  <img src={qrEth} alt="ETH QR" className="rounded border border-border w-[120px] h-[120px]" />
+              {(qrEth || qrSol) && (
+                <div className="flex flex-wrap items-start gap-4 text-xs text-muted-foreground">
+                  {qrEth && (
+                    <div className="flex items-center gap-2">
+                      <QrCode size={14} />
+                      <img src={qrEth} alt="ETH QR" className="rounded border border-border w-[120px] h-[120px]" />
+                    </div>
+                  )}
+                  {qrSol && (
+                    <div className="flex items-center gap-2">
+                      <QrCode size={14} />
+                      <img src={qrSol} alt="SOL QR" className="rounded border border-border w-[120px] h-[120px]" />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -492,9 +570,17 @@ export default function LocalWalletPanel() {
                   <Button size="sm" variant={sendChain === "bitcoin" ? "default" : "outline"} className="h-8 text-xs" onClick={() => setSendChain("bitcoin")}>
                     BTC
                   </Button>
+                  <Button size="sm" variant={sendChain === "solana" ? "default" : "outline"} className="h-8 text-xs" onClick={() => setSendChain("solana")}>
+                    SOL
+                  </Button>
                 </div>
                 <Input className="font-mono text-xs" placeholder="To address" value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
-                <Input className="font-mono text-xs" placeholder={sendChain === "ethereum" ? "Amount (ETH)" : "Amount (BTC)"} value={sendAmt} onChange={(e) => setSendAmt(e.target.value)} />
+                <Input
+                  className="font-mono text-xs"
+                  placeholder={sendChain === "ethereum" ? "Amount (ETH)" : sendChain === "bitcoin" ? "Amount (BTC)" : "Amount (SOL)"}
+                  value={sendAmt}
+                  onChange={(e) => setSendAmt(e.target.value)}
+                />
                 <div className="flex gap-2 flex-wrap">
                   <Button size="sm" variant="secondary" className="h-8 text-xs" disabled={busy} onClick={() => void estimateFee()}>
                     Estimate fee

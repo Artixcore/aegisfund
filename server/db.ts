@@ -14,7 +14,9 @@ import {
   users,
   wallets,
 } from "../drizzle/schema";
+import { kycProfiles, mfaSettings, userSessions, alertHistory, InsertKycProfile } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { assertFieldEncryptionForWrites, decryptUtf8Field, encryptUtf8Field } from "./fieldEncryption";
 import { resolveMysqlPoolOptions } from "../shared/mysqlUrl";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -43,6 +45,14 @@ export async function getDb() {
 // USER HELPERS
 // ============================================================
 
+function decryptUserPiiRow<U extends { name?: string | null; email?: string | null }>(row: U): U {
+  return {
+    ...row,
+    name: row.name != null ? decryptUtf8Field(row.name, "users.name") : row.name,
+    email: row.email != null ? decryptUtf8Field(row.email, "users.email") : row.email,
+  };
+}
+
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();
@@ -51,18 +61,29 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 
   try {
+    if (ENV.isProduction && ((user.name != null && user.name !== "") || (user.email != null && user.email !== ""))) {
+      assertFieldEncryptionForWrites();
+    }
     const values: InsertUser = { openId: user.openId };
     const updateSet: Record<string, unknown> = {};
-    const textFields = ["name", "email", "loginMethod"] as const;
-    type TextField = (typeof textFields)[number];
-    const assignNullable = (field: TextField) => {
+    const assignNullable = (field: "loginMethod") => {
       const value = user[field];
       if (value === undefined) return;
       const normalized = value ?? null;
       values[field] = normalized;
       updateSet[field] = normalized;
     };
-    textFields.forEach(assignNullable);
+    assignNullable("loginMethod");
+    if (user.name !== undefined) {
+      const n = user.name ?? null;
+      values.name = n === null ? null : encryptUtf8Field(n, "users.name");
+      updateSet.name = values.name;
+    }
+    if (user.email !== undefined) {
+      const e = user.email ?? null;
+      values.email = e === null ? null : encryptUtf8Field(e, "users.email");
+      updateSet.email = values.email;
+    }
     if (user.registrationIp !== undefined && user.registrationIp !== null) {
       values.registrationIp = user.registrationIp;
     }
@@ -82,7 +103,7 @@ export async function getUserByOpenId(openId: string) {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-  return result.length > 0 ? result[0] : undefined;
+  return result.length > 0 ? decryptUserPiiRow(result[0]) : undefined;
 }
 
 export async function hasUserRegisteredFromIp(ip: string): Promise<boolean> {
@@ -148,27 +169,6 @@ export async function deleteWallet(id: number, userId: number) {
   await db.delete(wallets).where(and(eq(wallets.id, id), eq(wallets.userId, userId)));
 }
 
-export async function upsertDefaultWallets(userId: number) {
-  const db = await getDb();
-  if (!db) return;
-  const existing = await getWalletsByUserId(userId);
-  if (existing.length > 0) return;
-  if (!ENV.demoWalletSeeding) {
-    return;
-  }
-
-  // Dev-only placeholder addresses — production uses MPC onboarding / user-supplied addresses only
-  const btcAddr = `bc1q${userId.toString().padStart(4, "0")}aegisfundbtcwallet${userId}xyzabc`;
-  const ethAddr = `0x${userId.toString(16).padStart(4, "0")}AegisFundETHWallet${userId}ABCDEF`.substring(0, 42);
-  const solAddr = `AegisFund${userId}SolanaWalletAddressXYZ${userId}`.substring(0, 44);
-
-  await db.insert(wallets).values([
-    { userId, chain: "BTC", address: btcAddr.substring(0, 62), label: "Primary Bitcoin", isDefault: true },
-    { userId, chain: "ETH", address: ethAddr, label: "Primary Ethereum", isDefault: true },
-    { userId, chain: "SOL", address: solAddr, label: "Primary Solana", isDefault: true },
-  ]);
-}
-
 // ============================================================
 // CONVERSATION & MESSAGE HELPERS
 // ============================================================
@@ -215,32 +215,6 @@ export async function createMessage(data: {
     .where(eq(conversations.id, data.conversationId));
 }
 
-export async function upsertDefaultConversations(userId: number) {
-  const db = await getDb();
-  if (!db) return;
-  const existing = await getConversationsByUserId(userId);
-  if (existing.length > 0) return;
-
-  const contacts = [
-    { participantName: "Cipher Protocol", participantHandle: "@cipher_proto" },
-    { participantName: "Vault Collective", participantHandle: "@vault_col" },
-    { participantName: "Meridian Capital", participantHandle: "@meridian_cap" },
-  ];
-
-  for (const contact of contacts) {
-    const [result] = await db.insert(conversations).values({
-      userId,
-      ...contact,
-      encryptionKey: `aegis_e2e_key_${Math.random().toString(36).substring(2)}`,
-    });
-    const convId = (result as { insertId: number }).insertId;
-    await db.insert(messages).values([
-      { conversationId: convId, senderId: 0, content: "Secure channel established. All communications are end-to-end encrypted.", encrypted: true },
-      { conversationId: convId, senderId: userId, content: "Confirmed. Ready to proceed.", encrypted: true },
-    ]);
-  }
-}
-
 // ============================================================
 // AGENT HELPERS
 // ============================================================
@@ -263,7 +237,6 @@ export async function getLatestAgentRuns(userId: number) {
       .orderBy(desc(agentRuns.createdAt))
       .limit(1);
     if (rows.length > 0) results.push(rows[0]);
-    else results.push({ id: 0, userId, agentType, status: "idle" as const, taskDescription: null, output: null, startedAt: null, completedAt: null, createdAt: new Date() });
   }
   return results;
 }
@@ -452,23 +425,68 @@ export async function savePortfolioSnapshot(userId: number, totalValueUsd: numbe
 // ============================================================
 // KYC HELPERS
 // ============================================================
-import { kycProfiles, mfaSettings, userSessions, alertHistory, InsertKycProfile } from "../drizzle/schema";
+
+const KYC_ENCRYPTED_TEXT_FIELDS = [
+  "fullName",
+  "dateOfBirth",
+  "nationality",
+  "countryOfResidence",
+  "documentType",
+  "documentNumber",
+  "documentFrontUrl",
+  "documentBackUrl",
+  "selfieUrl",
+  "rejectionReason",
+] as const;
+
+function decryptKycRow(row: typeof kycProfiles.$inferSelect): typeof kycProfiles.$inferSelect {
+  const out = { ...row };
+  for (const f of KYC_ENCRYPTED_TEXT_FIELDS) {
+    const v = out[f];
+    if (typeof v === "string" && v.length > 0) {
+      (out as unknown as Record<string, string | null>)[f] = decryptUtf8Field(v, `kyc_profiles.${f}`) ?? v;
+    }
+  }
+  return out;
+}
+
+function encryptKycPayload(data: Partial<InsertKycProfile>): Partial<InsertKycProfile> {
+  const out = { ...data };
+  for (const f of KYC_ENCRYPTED_TEXT_FIELDS) {
+    const v = out[f as keyof InsertKycProfile];
+    if (typeof v === "string" && v.length > 0) {
+      (out as unknown as Record<string, string>)[f] = encryptUtf8Field(v, `kyc_profiles.${f}`) ?? v;
+    }
+  }
+  return out;
+}
+
+function kycPayloadHasSensitiveFields(data: Partial<InsertKycProfile>): boolean {
+  return KYC_ENCRYPTED_TEXT_FIELDS.some((f) => {
+    const v = data[f as keyof InsertKycProfile];
+    return typeof v === "string" && v.length > 0;
+  });
+}
 
 export async function getKycProfile(userId: number) {
   const db = await getDb();
   if (!db) return null;
   const rows = await db.select().from(kycProfiles).where(eq(kycProfiles.userId, userId)).limit(1);
-  return rows.length > 0 ? rows[0] : null;
+  return rows.length > 0 ? decryptKycRow(rows[0]) : null;
 }
 
 export async function upsertKycProfile(userId: number, data: Partial<InsertKycProfile>) {
   const db = await getDb();
   if (!db) return;
+  if (ENV.isProduction && kycPayloadHasSensitiveFields(data)) {
+    assertFieldEncryptionForWrites();
+  }
+  const payload = encryptKycPayload(data);
   const existing = await getKycProfile(userId);
   if (existing) {
-    await db.update(kycProfiles).set({ ...data, updatedAt: new Date() }).where(eq(kycProfiles.userId, userId));
+    await db.update(kycProfiles).set({ ...payload, updatedAt: new Date() }).where(eq(kycProfiles.userId, userId));
   } else {
-    await db.insert(kycProfiles).values({ userId, ...data });
+    await db.insert(kycProfiles).values({ userId, ...payload });
   }
 }
 
@@ -476,28 +494,90 @@ export async function upsertKycProfile(userId: number, data: Partial<InsertKycPr
 // MFA HELPERS
 // ============================================================
 
+type MfaBackupCodesStored = string[] | { enc: string };
+
+function parseBackupCodesFromDb(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return raw as string[];
+  if (typeof raw === "object" && raw !== null && "enc" in raw && typeof (raw as { enc: string }).enc === "string") {
+    const dec = decryptUtf8Field((raw as { enc: string }).enc, "mfa_settings.backupCodes");
+    if (!dec) return null;
+    try {
+      return JSON.parse(dec) as string[];
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export async function getMfaSettings(userId: number) {
   const db = await getDb();
   if (!db) return null;
   const rows = await db.select().from(mfaSettings).where(eq(mfaSettings.userId, userId)).limit(1);
-  return rows.length > 0 ? rows[0] : null;
+  if (rows.length === 0) return null;
+  const row = rows[0];
+  return {
+    ...row,
+    totpSecret: row.totpSecret != null ? decryptUtf8Field(row.totpSecret, "mfa_settings.totpSecret") : row.totpSecret,
+    backupCodes: parseBackupCodesFromDb(row.backupCodes) as typeof row.backupCodes,
+  };
 }
 
 export async function upsertMfaSettings(userId: number, data: { isEnabled: boolean; totpSecret?: string; backupCodes?: string[]; enabledAt?: Date | null }) {
   const db = await getDb();
   if (!db) return;
-  const existing = await getMfaSettings(userId);
-  const payload = {
+  if (
+    ENV.isProduction &&
+    (data.isEnabled && (Boolean(data.totpSecret) || (data.backupCodes?.length ?? 0) > 0))
+  ) {
+    assertFieldEncryptionForWrites();
+  }
+
+  const patch: {
+    isEnabled: boolean;
+    totpSecret?: string | null;
+    backupCodes?: MfaBackupCodesStored | null;
+    enabledAt?: Date | null;
+    updatedAt: Date;
+  } = {
     isEnabled: data.isEnabled,
-    totpSecret: data.totpSecret ?? null,
-    backupCodes: data.backupCodes ?? null,
-    enabledAt: data.enabledAt ?? null,
     updatedAt: new Date(),
   };
-  if (existing) {
-    await db.update(mfaSettings).set(payload).where(eq(mfaSettings.userId, userId));
+  if (!data.isEnabled) {
+    patch.totpSecret = null;
+    patch.backupCodes = null;
+    patch.enabledAt = data.enabledAt ?? null;
   } else {
-    await db.insert(mfaSettings).values({ userId, ...payload });
+    if (data.enabledAt !== undefined) {
+      patch.enabledAt = data.enabledAt;
+    }
+    if (data.totpSecret !== undefined) {
+      patch.totpSecret =
+        data.totpSecret && data.totpSecret.length > 0
+          ? encryptUtf8Field(data.totpSecret, "mfa_settings.totpSecret")
+          : null;
+    }
+    if (data.backupCodes !== undefined) {
+      patch.backupCodes =
+        data.backupCodes && data.backupCodes.length > 0
+          ? { enc: encryptUtf8Field(JSON.stringify(data.backupCodes), "mfa_settings.backupCodes")! }
+          : null;
+    }
+  }
+
+  const existingRows = await db.select({ id: mfaSettings.id }).from(mfaSettings).where(eq(mfaSettings.userId, userId)).limit(1);
+  if (existingRows.length > 0) {
+    await db.update(mfaSettings).set(patch).where(eq(mfaSettings.userId, userId));
+  } else {
+    await db.insert(mfaSettings).values({
+      userId,
+      isEnabled: patch.isEnabled,
+      totpSecret: patch.totpSecret ?? null,
+      backupCodes: (patch.backupCodes ?? null) as typeof mfaSettings.$inferInsert.backupCodes,
+      enabledAt: patch.enabledAt ?? null,
+      updatedAt: patch.updatedAt,
+    });
   }
 }
 
@@ -557,6 +637,36 @@ export async function insertAlertHistory(userId: number, data: {
 // ADMIN HELPERS
 // ============================================================
 
+function mapAdminKycJoinRow<
+  T extends {
+    fullName: string | null;
+    dateOfBirth: string | null;
+    nationality: string | null;
+    countryOfResidence: string | null;
+    documentType: string | null;
+    documentNumber: string | null;
+    documentFrontUrl: string | null;
+    documentBackUrl: string | null;
+    selfieUrl: string | null;
+    rejectionReason: string | null;
+    userName: string | null;
+    userEmail: string | null;
+  },
+>(row: T): T {
+  const out = { ...row };
+  for (const f of KYC_ENCRYPTED_TEXT_FIELDS) {
+    const v = out[f as keyof T];
+    if (typeof v === "string" && v.length > 0) {
+      (out as unknown as Record<string, string | null>)[f] = decryptUtf8Field(v, `kyc_profiles.${f}`) ?? v;
+    }
+  }
+  return {
+    ...out,
+    userName: out.userName != null ? decryptUtf8Field(out.userName, "users.name") : out.userName,
+    userEmail: out.userEmail != null ? decryptUtf8Field(out.userEmail, "users.email") : out.userEmail,
+  };
+}
+
 export async function getAllKycProfiles() {
   const db = await getDb();
   if (!db) return [];
@@ -587,7 +697,7 @@ export async function getAllKycProfiles() {
     .from(kycProfiles)
     .leftJoin(users, eq(kycProfiles.userId, users.id))
     .orderBy(desc(kycProfiles.submittedAt));
-  return rows;
+  return rows.map(mapAdminKycJoinRow);
 }
 
 export async function getPendingKycProfiles() {
@@ -621,7 +731,7 @@ export async function getPendingKycProfiles() {
     .leftJoin(users, eq(kycProfiles.userId, users.id))
     .where(eq(kycProfiles.status, "under_review"))
     .orderBy(desc(kycProfiles.submittedAt));
-  return rows;
+  return rows.map(mapAdminKycJoinRow);
 }
 
 export async function reviewKycProfile(
@@ -631,11 +741,18 @@ export async function reviewKycProfile(
 ) {
   const db = await getDb();
   if (!db) return;
+  const plainReason =
+    decision === "rejected" ? (rejectionReason ?? "Application rejected by compliance team.") : null;
+  if (ENV.isProduction && plainReason) {
+    assertFieldEncryptionForWrites();
+  }
+  const encReason =
+    plainReason == null ? null : encryptUtf8Field(plainReason, "kyc_profiles.rejectionReason");
   await db
     .update(kycProfiles)
     .set({
       status: decision,
-      rejectionReason: decision === "rejected" ? (rejectionReason ?? "Application rejected by compliance team.") : null,
+      rejectionReason: encReason,
       reviewedAt: new Date(),
     })
     .where(eq(kycProfiles.id, profileId));

@@ -63,14 +63,14 @@ export type P2pEphemeralNoticeV1 = { type: "ephemeral"; v: 1; messageId: string;
 export type WalletInfoV1 = {
   v: 1;
   type: "wallet_info";
-  chains: Partial<{ ethereum: string; bitcoin: string }>;
+  chains: Partial<{ ethereum: string; bitcoin: string; solana: string }>;
   displayName?: string;
 };
 
 export type P2pPaymentAckV1 = {
   v: 1;
   type: "payment_ack";
-  chain: "ethereum" | "bitcoin";
+  chain: "ethereum" | "bitcoin" | "solana";
   txHash: string;
 };
 
@@ -134,7 +134,13 @@ export function parseP2pChannelFrame(raw: unknown): P2pChannelFrame | null {
   }
   if (o.type === "payment_ack") {
     const p = (raw as { payload?: P2pPaymentAckV1 }).payload;
-    if (!p || p.v !== 1 || p.type !== "payment_ack" || (p.chain !== "ethereum" && p.chain !== "bitcoin") || typeof p.txHash !== "string")
+    if (
+      !p ||
+      p.v !== 1 ||
+      p.type !== "payment_ack" ||
+      (p.chain !== "ethereum" && p.chain !== "bitcoin" && p.chain !== "solana") ||
+      typeof p.txHash !== "string"
+    )
       return null;
     return raw as P2pChannelFrame;
   }
@@ -175,7 +181,7 @@ export type P2pPeerRecord = {
   /** When false, inbound chat is ignored until user enables chat for this contact. */
   inboundChatEnabled?: boolean;
   /** Last known addresses from peer `wallet_info` frames. */
-  chainAddresses?: Partial<{ ethereum: string; bitcoin: string }>;
+  chainAddresses?: Partial<{ ethereum: string; bitcoin: string; solana: string }>;
 };
 
 export type P2pStoredMessage = {
@@ -192,7 +198,7 @@ export type P2pStoredMessage = {
   /** Structured DM rows (not encrypted plaintext). */
   narrativeKind?: "wallet_info" | "payment_ack";
   walletInfoPayload?: WalletInfoV1;
-  paymentAckPayload?: { chain: "ethereum" | "bitcoin"; txHash: string };
+  paymentAckPayload?: { chain: "ethereum" | "bitcoin" | "solana"; txHash: string };
 };
 
 export type P2pOutboxRecord = {

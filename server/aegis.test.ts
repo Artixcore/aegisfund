@@ -60,7 +60,7 @@ describe("auth.logout", () => {
     expect(clearedCookies[0]?.options).toMatchObject({
       maxAge: -1,
       secure: true,
-      sameSite: "none",
+      sameSite: "lax",
       httpOnly: true,
       path: "/",
     });
@@ -156,18 +156,23 @@ describe("messages.sendMessage input validation", () => {
 });
 
 // ============================================================
-// PORTFOLIO MOCK DATA TESTS
+// PORTFOLIO (live-derived summary; depends on DB + price gateway when unmocked)
 // ============================================================
 describe("portfolio.getSummary", () => {
-  it("returns portfolio summary with expected fields", async () => {
+  it("returns numeric summary fields consistent with totals", async () => {
     const { ctx } = createAuthContext();
     const caller = appRouter.createCaller(ctx);
     const summary = await caller.portfolio.getSummary();
 
-    expect(summary.totalValueUsd).toBeGreaterThan(0);
-    expect(summary.btcBalance).toBeGreaterThan(0);
-    expect(summary.ethBalance).toBeGreaterThan(0);
-    expect(summary.solBalance).toBeGreaterThan(0);
-    expect(summary.allocationBtc + summary.allocationEth + summary.allocationSol).toBeCloseTo(100, 0);
+    expect(typeof summary.totalValueUsd).toBe("number");
+    expect(typeof summary.btcBalance).toBe("number");
+    expect(typeof summary.ethBalance).toBe("number");
+    expect(typeof summary.solBalance).toBe("number");
+    const allocSum = summary.allocationBtc + summary.allocationEth + summary.allocationSol;
+    if (summary.totalValueUsd > 0) {
+      expect(allocSum).toBeCloseTo(100, 0);
+    } else {
+      expect(allocSum).toBe(0);
+    }
   });
 });

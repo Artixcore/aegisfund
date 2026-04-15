@@ -39,6 +39,8 @@ build/
 ehthumbs.db
 Thumbs.db
 
+docs/*
+
 # Logs
 logs
 *.log

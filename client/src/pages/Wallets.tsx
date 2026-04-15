@@ -708,7 +708,7 @@ export default function Wallets() {
           <div className="mono-label">Transaction History</div>
           <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
             <Wallet size={11} />
-            All chains · Mock data
+            All chains · Live balances (RPC / REST as configured)
           </div>
         </div>
         <div className="overflow-x-auto">

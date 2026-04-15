@@ -227,7 +227,21 @@ OWNER_NAME=Your Name
 
 # External APIs
 ETHERSCAN_API_KEY=your-etherscan-api-key
+
+# Production: AES-256-GCM for KYC / MFA / user name+email at rest (see .env.example)
+DATABASE_FIELD_ENCRYPTION_KEY=
+
+# Production: require ciphertextEnvelope on relay sendMessage (optional override)
+MESSAGES_REQUIRE_CIPHERTEXT=
 ```
+
+### Production data protection
+
+- **Database encryption at rest**: enable storage encryption on your MySQL host (for example [Amazon RDS encryption](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html) or your cloud provider’s equivalent) and prefer TLS for client connections.
+- **Application field encryption**: set `DATABASE_FIELD_ENCRYPTION_KEY` to a 32-byte secret (64 hex characters or a 44-character base64 string). The server encrypts sensitive KYC columns, MFA material, and `users.name` / `users.email` at rest. In `NODE_ENV=production`, persisting those fields requires this key.
+- **Relay messages**: in production, `messages.sendMessage` requires a client `ciphertextEnvelope` (set `MESSAGES_REQUIRE_CIPHERTEXT=false` only if you intentionally allow plaintext relay bodies).
+
+Always run all SQL migrations (`npx drizzle-kit migrate` or your deployment migration command) before serving traffic so every table in [`drizzle/schema.ts`](drizzle/schema.ts) exists.
 
 ### Install & Run
 

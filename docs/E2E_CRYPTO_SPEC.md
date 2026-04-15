@@ -95,5 +95,5 @@ The [`Messages`](../client/src/pages/Messages.tsx) page uses **browser-only** P2
 
 ### Local multi-chain wallet (separate from P2P identity)
 
-- **BIP39 vault** in IndexedDB (`aegis-chain-wallet-v1`), browser-only JSON-RPC / Esplora; see [LOCAL_WALLET.md](./LOCAL_WALLET.md).
+- **BIP39 vault** in IndexedDB (`aegis-chain-wallet-v1`), browser-only JSON-RPC (ETH, SOL) and Esplora (BTC); see [LOCAL_WALLET.md](./LOCAL_WALLET.md).
 - **P2P**: optional `wallet_info` / `payment_ack` frames on the same data channel ([`types.ts`](../client/src/p2p/types.ts)); Messages can **Share my addresses** when the local wallet session is unlocked on the Wallets tab.

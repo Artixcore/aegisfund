@@ -8,7 +8,6 @@ import {
   AlertTriangle,
   BarChart3,
   Bot,
-  Clock,
   RefreshCw,
   TrendingUp,
   Zap,
@@ -71,13 +70,13 @@ const ALLOCATION_COLORS = [
   "oklch(0.35 0 0)",
 ];
 
-const RECENT_ACTIVITY = [
-  { type: "receive", asset: "BTC", amount: "+0.0821", usd: "+$8,420.18", time: "2h ago", label: "Received" },
-  { type: "send", asset: "ETH", amount: "-2.5", usd: "-$6,125.00", time: "5h ago", label: "Sent" },
-  { type: "receive", asset: "SOL", amount: "+48.0", usd: "+$7,344.00", time: "1d ago", label: "Received" },
-  { type: "send", asset: "BTC", amount: "-0.12", usd: "-$12,300.00", time: "2d ago", label: "Sent" },
-  { type: "receive", asset: "ETH", amount: "+5.0", usd: "+$12,250.00", time: "3d ago", label: "Received" },
-];
+const AGENT_TYPES = [
+  "market_analysis",
+  "crypto_monitoring",
+  "forex_monitoring",
+  "futures_commodities",
+  "historical_research",
+] as const;
 
 const RANGE_OPTIONS = [
   { label: "7D", days: 7 },
@@ -110,6 +109,17 @@ export default function Dashboard() {
   const eth = prices?.ETH;
   const sol = prices?.SOL;
 
+  const agentRunByType = new Map(agentStatuses?.map((a) => [a.agentType, a]) ?? []);
+  let runningAgentTypes = 0;
+  let completeAgentTypes = 0;
+  let otherAgentTypes = 0;
+  for (const t of AGENT_TYPES) {
+    const st = agentRunByType.get(t)?.status;
+    if (st === "running" || st === "analyzing") runningAgentTypes += 1;
+    else if (st === "complete") completeAgentTypes += 1;
+    else otherAgentTypes += 1;
+  }
+
   const allocationData = portfolio
     ? [
         { name: "BTC", value: portfolio.allocationBtc },
@@ -118,8 +128,8 @@ export default function Dashboard() {
       ]
     : [];
 
-  const runningAgents = agentStatuses?.filter((a) => a.status === "running" || a.status === "analyzing").length ?? 0;
-  const completedAgents = agentStatuses?.filter((a) => a.status === "complete").length ?? 0;
+  const runningAgents = runningAgentTypes;
+  const completedAgents = completeAgentTypes;
 
   // Compute P&L from history
   const firstValue = historyData?.[0]?.totalValueUsd ?? 0;
@@ -182,15 +192,15 @@ export default function Dashboard() {
           <div className="flex items-center gap-4 mt-4 pt-4 border-t border-border">
             <div>
               <div className="mono-label">BTC</div>
-              <div className="text-sm font-mono font-medium mt-0.5">{portfolio?.btcBalance.toFixed(4) ?? "—"}</div>
+              <div className="text-sm font-mono font-medium mt-0.5">{(portfolio?.btcBalance ?? 0).toFixed(4)}</div>
             </div>
             <div>
               <div className="mono-label">ETH</div>
-              <div className="text-sm font-mono font-medium mt-0.5">{portfolio?.ethBalance.toFixed(4) ?? "—"}</div>
+              <div className="text-sm font-mono font-medium mt-0.5">{(portfolio?.ethBalance ?? 0).toFixed(4)}</div>
             </div>
             <div>
               <div className="mono-label">SOL</div>
-              <div className="text-sm font-mono font-medium mt-0.5">{portfolio?.solBalance.toFixed(2) ?? "—"}</div>
+              <div className="text-sm font-mono font-medium mt-0.5">{(portfolio?.solBalance ?? 0).toFixed(2)}</div>
             </div>
           </div>
         </div>
@@ -247,15 +257,15 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="pulse-dot pulse-gray" />
-                <span className="text-xs font-mono text-muted-foreground">Idle</span>
+                <span className="text-xs font-mono text-muted-foreground">Idle / other</span>
               </div>
-              <span className="text-sm font-mono font-medium">{5 - runningAgents - completedAgents}</span>
+              <span className="text-sm font-mono font-medium">{otherAgentTypes}</span>
             </div>
           </div>
           <div className="mt-3 pt-3 border-t border-border">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
               <Zap size={10} />
-              <span>5 agents deployed</span>
+              <span>{AGENT_TYPES.length} agent types · {agentStatuses?.length ?? 0} with run history</span>
             </div>
           </div>
         </div>
@@ -353,40 +363,15 @@ export default function Dashboard() {
 
       {/* Bottom row: Activity + Alerts */}
       <div className="grid grid-cols-2 gap-4">
-        {/* Recent activity */}
+        {/* On-chain activity (no server-side tx feed yet) */}
         <div className="aegis-card">
           <div className="flex items-center justify-between mb-4">
             <div className="mono-label">Recent Activity</div>
             <Activity size={13} className="text-muted-foreground" />
           </div>
-          <div className="space-y-3">
-            {RECENT_ACTIVITY.map((tx, i) => (
-              <div key={i} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                <div className="flex items-center gap-3">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
-                    tx.type === "receive" ? "bg-aegis-green/10" : "bg-aegis-red/10"
-                  }`}>
-                    {tx.type === "receive"
-                      ? <ArrowDownRight size={11} className="text-aegis-green" />
-                      : <ArrowUpRight size={11} className="text-aegis-red" />
-                    }
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium">{tx.label} {tx.asset}</div>
-                    <div className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
-                      <Clock size={8} /> {tx.time}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className={`text-xs font-mono font-medium ${tx.type === "receive" ? "text-aegis-green" : "text-aegis-red"}`}>
-                    {tx.amount}
-                  </div>
-                  <div className="text-[10px] font-mono text-muted-foreground">{tx.usd}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <p className="text-xs text-muted-foreground font-mono leading-relaxed">
+            On-chain transfers are not indexed here yet. Use your wallet explorer for transaction history; portfolio totals above reflect live balances.
+          </p>
         </div>
 
         {/* Watchlist + Alerts */}
@@ -396,22 +381,9 @@ export default function Dashboard() {
               <div className="mono-label">Market Alerts</div>
               <AlertTriangle size={13} className="text-aegis-gold" />
             </div>
-            <div className="space-y-3">
-              {[
-                { label: "BTC approaching resistance", level: "warn", time: "Live" },
-                { label: "ETH gas fees elevated", level: "info", time: "15m ago" },
-                { label: "SOL validator activity spike", level: "info", time: "1h ago" },
-                { label: "DXY breaking key level", level: "warn", time: "2h ago" },
-              ].map((alert, i) => (
-                <div key={i} className="flex items-start gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${alert.level === "warn" ? "bg-aegis-gold" : "bg-aegis-blue"}`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs text-foreground">{alert.label}</div>
-                    <div className="text-[10px] font-mono text-muted-foreground">{alert.time}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <p className="text-xs text-muted-foreground font-mono leading-relaxed">
+              Configure price alerts under Alerts to receive threshold notifications when markets move.
+            </p>
           </div>
 
           <div className="aegis-card">

@@ -28,11 +28,18 @@ vi.mock("./_core/notification", () => ({
   notifyOwner: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock("./cryptoPrices", () => ({
+  fetchCryptoSpotPrices: vi.fn().mockResolvedValue({
+    BTC: { symbol: "BTC", price: 100_000, change24h: 0, changePct24h: 2, high24h: 0, low24h: 0, volume24h: 0, sparkline: [] },
+    ETH: { symbol: "ETH", price: 3000, change24h: 0, changePct24h: 1, high24h: 0, low24h: 0, volume24h: 0, sparkline: [] },
+    SOL: { symbol: "SOL", price: 150, change24h: 0, changePct24h: 0.5, high24h: 0, low24h: 0, volume24h: 0, sparkline: [] },
+  }),
+}));
+
 vi.mock("./db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./db")>();
   return {
     ...actual,
-    upsertDefaultWallets: vi.fn().mockResolvedValue(undefined),
     getWalletsByUserId: vi.fn().mockResolvedValue([
       { id: 1, userId: 1, chain: "BTC", address: "bc1q_test", label: "Primary BTC", createdAt: new Date() },
       { id: 2, userId: 1, chain: "ETH", address: "0x_test", label: "Primary ETH", createdAt: new Date() },
@@ -64,7 +71,6 @@ vi.mock("./db", async (importOriginal) => {
     ]),
     createAgentRun: vi.fn().mockResolvedValue(42),
     updateAgentRun: vi.fn().mockResolvedValue(undefined),
-    upsertDefaultConversations: vi.fn().mockResolvedValue(undefined),
     getConversationsByUserId: vi.fn().mockResolvedValue([]),
     getMessagesByConversationId: vi.fn().mockResolvedValue([]),
     createMessage: vi.fn().mockResolvedValue(1),
@@ -240,6 +246,9 @@ describe("portfolio.getSummary", () => {
     const summary = await caller.portfolio.getSummary();
     expect(summary.totalValueUsd).toBeGreaterThan(0);
     expect(summary.btcBalance).toBeGreaterThan(0);
-    expect(summary.allocationBtc + summary.allocationEth + summary.allocationSol).toBeCloseTo(100, 0);
+    expect(summary.ethBalance).toBeGreaterThan(0);
+    expect(summary.solBalance).toBeGreaterThan(0);
+    const allocSum = summary.allocationBtc + summary.allocationEth + summary.allocationSol;
+    expect(allocSum).toBeCloseTo(100, 0);
   });
 });

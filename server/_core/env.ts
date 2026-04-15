@@ -46,7 +46,15 @@ export const ENV = {
   btcRestApiBase: process.env.BTC_REST_API_BASE ?? "",
   ethRpcUrl: process.env.ETH_RPC_URL ?? "",
   solRpcUrl: process.env.SOL_RPC_URL ?? "",
-  demoWalletSeeding:
-    process.env.DEMO_WALLET_SEEDING === "true" ||
-    (process.env.NODE_ENV !== "production" && process.env.DEMO_WALLET_SEEDING !== "false"),
+  /** Production: reject relay messages without client ciphertext. Override with MESSAGES_REQUIRE_CIPHERTEXT=false. */
+  messagesRequireCiphertext:
+    process.env.NODE_ENV === "production"
+      ? process.env.MESSAGES_REQUIRE_CIPHERTEXT !== "false"
+      : process.env.MESSAGES_REQUIRE_CIPHERTEXT === "true",
+
+  /**
+   * AES-256 field encryption for KYC/MFA/user PII at rest (hex 64 chars or base64 44 chars).
+   * Required in production when writing encrypted columns (see server/fieldEncryption.ts).
+   */
+  databaseFieldEncryptionKey: process.env.DATABASE_FIELD_ENCRYPTION_KEY?.trim() ?? "",
 };

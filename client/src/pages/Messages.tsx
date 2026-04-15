@@ -118,6 +118,10 @@ function btcAddrLooksValid(s: string): boolean {
   return /^(bc1|tb1)[a-z0-9]{8,90}$/i.test(s.trim());
 }
 
+function solAddrLooksValid(s: string): boolean {
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s.trim());
+}
+
 function DmMessageBody({ msg }: { msg: P2pStoredMessage }) {
   if (msg.narrativeKind === "wallet_info" && msg.walletInfoPayload) {
     const w = msg.walletInfoPayload;
@@ -134,6 +138,12 @@ function DmMessageBody({ msg }: { msg: P2pStoredMessage }) {
           <div className="break-all">
             <span className="text-muted-foreground">BTC </span>
             {w.chains.bitcoin}
+          </div>
+        )}
+        {w.chains.solana && (
+          <div className="break-all">
+            <span className="text-muted-foreground">SOL </span>
+            {w.chains.solana}
           </div>
         )}
       </div>
@@ -377,9 +387,10 @@ export default function Messages() {
 
     if (frame.type === "wallet_info") {
       const w = frame.payload;
-      const next: Partial<{ ethereum: string; bitcoin: string }> = { ...peer.chainAddresses };
+      const next: Partial<{ ethereum: string; bitcoin: string; solana: string }> = { ...peer.chainAddresses };
       if (w.chains.ethereum && isAddress(w.chains.ethereum)) next.ethereum = w.chains.ethereum;
       if (w.chains.bitcoin && btcAddrLooksValid(w.chains.bitcoin)) next.bitcoin = w.chains.bitcoin;
+      if (w.chains.solana && solAddrLooksValid(w.chains.solana)) next.solana = w.chains.solana;
       await putPeer(db, { ...peer, chainAddresses: next });
       const id = crypto.randomUUID();
       await putMessage(db, {
@@ -934,7 +945,7 @@ export default function Messages() {
       const payload: WalletInfoV1 = {
         v: 1,
         type: "wallet_info",
-        chains: { ethereum: addrs.ethereum, bitcoin: addrs.bitcoin },
+        chains: { ethereum: addrs.ethereum, bitcoin: addrs.bitcoin, solana: addrs.solana },
       };
       const frame: P2pChannelFrame = { type: "wallet_info", payload };
       const frameJson = JSON.stringify(frame);
@@ -1358,7 +1369,9 @@ export default function Messages() {
                     {outboxCount > 0 && <span className="ml-2 text-amber-500">{outboxCount} queued</span>}
                     {typingRemote && <span className="ml-2 text-sky-500">typing…</span>}
                   </div>
-                  {(selectedPeer.chainAddresses?.ethereum || selectedPeer.chainAddresses?.bitcoin) && (
+                  {(selectedPeer.chainAddresses?.ethereum ||
+                    selectedPeer.chainAddresses?.bitcoin ||
+                    selectedPeer.chainAddresses?.solana) && (
                     <div className="text-[10px] font-mono text-muted-foreground mt-1 space-y-0.5 max-w-xl">
                       {selectedPeer.chainAddresses.ethereum && (
                         <div className="break-all">
@@ -1368,6 +1381,11 @@ export default function Messages() {
                       {selectedPeer.chainAddresses.bitcoin && (
                         <div className="break-all">
                           <span className="text-foreground/70">Their BTC:</span> {selectedPeer.chainAddresses.bitcoin}
+                        </div>
+                      )}
+                      {selectedPeer.chainAddresses.solana && (
+                        <div className="break-all">
+                          <span className="text-foreground/70">Their SOL:</span> {selectedPeer.chainAddresses.solana}
                         </div>
                       )}
                     </div>

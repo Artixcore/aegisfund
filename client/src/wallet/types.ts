@@ -2,15 +2,20 @@
 
 export type EthNetworkId = "mainnet" | "sepolia";
 export type BtcNetworkId = "mainnet" | "testnet";
+/** Solana cluster name for explorers and defaults */
+export type SolNetworkId = "mainnet-beta" | "devnet";
 
-export type LocalChainId = "ethereum" | "bitcoin";
+export type LocalChainId = "ethereum" | "bitcoin" | "solana";
 
 export type WalletSettings = {
   ethRpcUrl: string;
   /** Esplora-compatible REST base, no trailing slash */
   btcEsploraBase: string;
+  /** Solana JSON-RPC (browser CORS required, same constraints as ETH RPC) */
+  solRpcUrl: string;
   ethNetwork: EthNetworkId;
   btcNetwork: BtcNetworkId;
+  solNetwork: SolNetworkId;
   /** BIP44 account index (ETH path m/44'/60'/0'/0/i) */
   accountIndex: number;
 };
@@ -18,8 +23,10 @@ export type WalletSettings = {
 export const DEFAULT_WALLET_SETTINGS: WalletSettings = {
   ethRpcUrl: "",
   btcEsploraBase: "https://blockstream.info/api",
+  solRpcUrl: "",
   ethNetwork: "mainnet",
   btcNetwork: "mainnet",
+  solNetwork: "mainnet-beta",
   accountIndex: 0,
 };
 
@@ -54,10 +61,14 @@ export type NativeSendParams = {
   amountEthDecimal?: string;
   /** BTC: satoshis as string */
   amountSats?: string;
+  /** SOL: decimal string from UI (e.g. "0.1") */
+  amountSolDecimal?: string;
   ethRpcUrl: string;
   ethNetwork: EthNetworkId;
   btcEsploraBase: string;
   btcNetwork: BtcNetworkId;
+  solRpcUrl: string;
+  solNetwork: SolNetworkId;
 };
 
 export type NativeSendResult = {
@@ -76,6 +87,6 @@ export interface ChainAdapter {
     settings: WalletSettings,
     to: string,
     amount: string,
-  ): Promise<{ wei?: bigint; sats?: bigint; display: string }>;
+  ): Promise<{ wei?: bigint; sats?: bigint; lamports?: bigint; display: string }>;
   signAndBroadcastNativeSend(params: NativeSendParams): Promise<NativeSendResult>;
 }
