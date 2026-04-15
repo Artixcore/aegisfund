@@ -63,7 +63,16 @@ vi.mock("./db", async (importOriginal) => {
     getDueSchedules: vi.fn().mockResolvedValue([]),
     updateScheduleAfterRun: vi.fn().mockResolvedValue(undefined),
     getLatestAgentRuns: vi.fn().mockResolvedValue([
-      { id: 1, userId: 1, agentType: "market_analysis", status: "complete", taskDescription: "Market analysis", output: { summary: "Bullish" }, completedAt: new Date() },
+      {
+        id: 1,
+        userId: 1,
+        agentType: "market_analysis",
+        status: "complete",
+        taskDescription: "Market analysis",
+        errorMessage: null,
+        output: { summary: "Bullish" },
+        completedAt: new Date(),
+      },
     ]),
     getAgentHistory: vi.fn().mockResolvedValue([
       { id: 1, userId: 1, agentType: "market_analysis", status: "complete", taskDescription: "Market analysis", output: { summary: "Bullish" }, completedAt: new Date() },

@@ -4,6 +4,7 @@ import { ed25519KeyHex64Schema, ed25519SignatureHex128Schema } from "@shared/dap
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { toAgentErrorMessage } from "./agents/errorMessage";
 import { prepareAgentRun } from "./agents/orchestrator";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { invokeLLM } from "./_core/llm";
@@ -120,10 +121,11 @@ async function runAgentScheduler() {
   try {
     const dueSchedules = await getDueSchedules();
     for (const schedule of dueSchedules) {
+      let runId: number | undefined;
       try {
         const prepared = await prepareAgentRun(schedule.agentType);
         const userPreview = prepared.messages[1]?.content?.substring(0, 180) ?? "";
-        const runId = await createAgentRun({
+        runId = await createAgentRun({
           userId: schedule.userId,
           agentType: schedule.agentType,
           taskDescription: `[Scheduled] ${userPreview}`,
@@ -151,6 +153,13 @@ async function runAgentScheduler() {
         await updateScheduleAfterRun(schedule.id, schedule.intervalHours);
       } catch (err) {
         console.error(`[AgentScheduler] Failed to run ${schedule.agentType}:`, err);
+        if (runId !== undefined) {
+          await updateAgentRun(runId, {
+            status: "alert",
+            completedAt: new Date(),
+            errorMessage: toAgentErrorMessage(err),
+          });
+        }
         await updateScheduleAfterRun(schedule.id, schedule.intervalHours);
       }
     }
@@ -468,7 +477,11 @@ const agentsRouter = router({
         await updateAgentRun(runId, { status: "complete", output, completedAt: new Date() });
         return { success: true, runId, output };
       } catch (error) {
-        await updateAgentRun(runId, { status: "alert", completedAt: new Date() });
+        await updateAgentRun(runId, {
+          status: "alert",
+          completedAt: new Date(),
+          errorMessage: toAgentErrorMessage(error),
+        });
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Agent execution failed" });
       }
     }),

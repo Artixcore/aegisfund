@@ -309,7 +309,13 @@ function AgentCard({
   onHistory,
 }: {
   agentType: AgentType;
-  agentRun: { status: string; output: unknown; taskDescription: string | null; completedAt: Date | null } | null;
+  agentRun: {
+    status: string;
+    output: unknown;
+    taskDescription: string | null;
+    completedAt: Date | null;
+    errorMessage?: string | null;
+  } | null;
   schedule: { intervalHours: number; isActive: boolean; nextRunAt: Date | null } | null;
   onRun: () => void;
   isRunning: boolean;
@@ -360,8 +366,22 @@ function AgentCard({
         </div>
       )}
 
-      {/* Output */}
-      {output && <OutputSection output={output} />}
+      {status === "alert" && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-muted-foreground flex gap-2 items-start">
+          <AlertTriangle size={14} className="shrink-0 text-destructive mt-0.5" />
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-wide text-destructive/90 mb-1">Run failed</div>
+            <p className="leading-relaxed">
+              {agentRun?.errorMessage?.trim()
+                ? agentRun.errorMessage
+                : "No error details were stored for this run."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Output — omit stale JSON when latest run failed */}
+      {output && status !== "alert" && <OutputSection output={output} />}
 
       {/* Completed time */}
       {agentRun?.completedAt && (

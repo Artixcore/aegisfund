@@ -273,14 +273,17 @@ export async function updateAgentRun(id: number, data: {
   status: "idle" | "running" | "analyzing" | "complete" | "alert";
   output?: unknown;
   completedAt?: Date;
+  errorMessage?: string | null;
 }) {
   const db = await getDb();
   if (!db) return;
-  await db.update(agentRuns).set({
+  const patch = {
     status: data.status,
     output: data.output as Record<string, unknown> | null | undefined,
     completedAt: data.completedAt,
-  }).where(eq(agentRuns.id, id));
+    ...(data.errorMessage !== undefined ? { errorMessage: data.errorMessage } : {}),
+  };
+  await db.update(agentRuns).set(patch).where(eq(agentRuns.id, id));
 }
 
 // ============================================================

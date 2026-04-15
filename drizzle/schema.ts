@@ -106,6 +106,7 @@ export const agentRuns = mysqlTable("agent_runs", {
   ]).notNull(),
   status: mysqlEnum("status", ["idle", "running", "analyzing", "complete", "alert"]).default("idle").notNull(),
   taskDescription: text("taskDescription"),
+  errorMessage: text("errorMessage"),
   output: json("output"),
   startedAt: timestamp("startedAt"),
   completedAt: timestamp("completedAt"),
