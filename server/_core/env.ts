@@ -46,6 +46,38 @@ export const ENV = {
     process.env.BUILT_IN_FORGE_API_KEY ??
     "",
 
+  /** Default provider when not overridden (`legacy` uses LLM_BASE_URL / LLM_API_KEY / LLM_MODEL). */
+  llmDefaultProvider: process.env.LLM_DEFAULT_PROVIDER?.trim().toLowerCase() ?? "",
+  /** Comma-separated provider ids tried after the primary fails (e.g. `grok,openai`). */
+  llmFallbackProvidersRaw: process.env.LLM_FALLBACK_PROVIDERS?.trim() ?? "",
+  /** JSON map of agent type → provider id (e.g. `{"crypto_monitoring":"grok"}`). */
+  llmAgentRoutingRaw: process.env.LLM_AGENT_ROUTING?.trim() ?? "",
+
+  /** OpenAI platform (https://api.openai.com). */
+  openaiApiKey: process.env.OPENAI_API_KEY?.trim() ?? "",
+  openaiLlmModel: process.env.OPENAI_LLM_MODEL?.trim() || "gpt-4o-mini",
+
+  /** Google Gemini (OpenAI-compatible surface, AI Studio key). */
+  geminiApiKey:
+    process.env.GEMINI_API_KEY?.trim() ??
+    process.env.GOOGLE_API_KEY?.trim() ??
+    "",
+  geminiLlmModel: process.env.GEMINI_LLM_MODEL?.trim() || "gemini-2.5-flash",
+
+  /** xAI Grok (https://api.x.ai). */
+  xaiApiKey:
+    process.env.XAI_API_KEY?.trim() ??
+    process.env.GROK_API_KEY?.trim() ??
+    "",
+  xaiLlmModel:
+    process.env.XAI_LLM_MODEL?.trim() ??
+    process.env.GROK_LLM_MODEL?.trim() ??
+    "grok-2-latest",
+
+  /** DeepSeek (https://api.deepseek.com). */
+  deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() ?? "",
+  deepseekLlmModel: process.env.DEEPSEEK_LLM_MODEL?.trim() || "deepseek-chat",
+
   /** Optional HTTPS URL for owner alerts (JSON POST: { title, content }). */
   notificationWebhookUrl: process.env.NOTIFICATION_WEBHOOK_URL ?? "",
 

@@ -50,7 +50,7 @@ Five parallel LLM-powered intelligence agents, each with its own status indicato
 | Futures & Commodities | Futures curve, oil, gold, commodity signals |
 | Historical Research | Pattern recognition, backtested insights |
 
-- **Run Agent** — Triggers a real LLM call via `invokeLLM` with structured JSON schema output.
+- **Run Agent** — Triggers a real LLM call via `invokeLLM` (routes through `LLMManager`: default provider, optional per-agent routing, and fallbacks) with structured JSON schema output.
 - **Run All Agents** — Fires all five agents in parallel.
 - **Agent Scheduling** — Configure per-agent auto-run intervals (1h to 7d); the background scheduler polls every 60 seconds and auto-runs due agents.
 - **History Panel** — Last 10 runs per agent with timestamps and output summaries.
@@ -137,12 +137,12 @@ Five parallel LLM-powered intelligence agents, each with its own status indicato
 | Database | MySQL / TiDB |
 | Auth | JWT session cookie (`JWT_SECRET`, optional `/api/auth/dev-login`) |
 | File storage | AWS S3 (via `storagePut` helper) |
-| LLM | OpenAI-compatible HTTP API (`LLM_BASE_URL` + `LLM_API_KEY`) |
+| LLM | Multi-provider `server/llm` layer: OpenAI, Gemini (OpenAI-compat), Grok, DeepSeek, plus legacy `LLM_BASE_URL` / `LLM_API_KEY` |
 | Price data | Data gateway (`AEGIS_DATA_API_URL` + key), Yahoo chart route |
 | BTC balances | Blockstream.info (free, no key) |
 | ETH balances | Etherscan v2 API |
 | SOL balances | Solana mainnet JSON-RPC |
-| Testing | Vitest (35 tests) |
+| Testing | Vitest |
 | Build | Vite 7 + esbuild |
 | Package manager | npm (`package-lock.json`) |
 
@@ -173,6 +173,7 @@ aegis-fund/
 │       ├── index.css               # Premium dark design system
 │       └── App.tsx                 # Route definitions
 ├── server/
+│   ├── llm/                        # Multi-provider LLM manager (OpenAI-compat transport)
 │   ├── routers.ts                  # All tRPC procedures + background services
 │   ├── db.ts                       # Drizzle query helpers
 │   ├── blockchain.ts               # BTC / ETH / SOL balance fetchers
@@ -215,7 +216,7 @@ JWT_SECRET=your-jwt-secret
 JWT_ISSUER=aegis-fund
 AUTH_DEV_LOGIN=true
 
-# Data + LLM (OpenAI-compatible)
+# Data + LLM (see .env.example for multi-provider keys and LLM_DEFAULT_PROVIDER)
 AEGIS_DATA_API_URL=
 AEGIS_DATA_API_KEY=
 LLM_BASE_URL=https://api.openai.com

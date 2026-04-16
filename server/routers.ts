@@ -155,6 +155,7 @@ async function runAgentScheduler() {
         const response = await invokeLLM({
           messages: prepared.messages,
           response_format: agentJsonResponseFormat(schedule.agentType),
+          llm: { agentType: schedule.agentType },
         });
 
         const rawMsg = response?.choices?.[0]?.message?.content;
@@ -573,6 +574,7 @@ const agentsRouter = router({
         const response = await invokeLLM({
           messages: prepared.messages,
           response_format: agentJsonResponseFormat(input.agentType),
+          llm: { agentType: input.agentType },
         });
 
         const rawMsg = response?.choices?.[0]?.message?.content;
@@ -618,6 +620,7 @@ const agentsRouter = router({
       const response = await invokeLLM({
         messages: prepared.messages,
         response_format: agentJsonResponseFormat("executive_briefing"),
+        llm: { agentType: "executive_briefing" },
       });
 
       const rawMsg = response?.choices?.[0]?.message?.content;
