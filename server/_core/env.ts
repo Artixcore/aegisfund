@@ -31,6 +31,11 @@ export const ENV = {
   dataServiceApiKey:
     process.env.AEGIS_DATA_API_KEY ?? process.env.BUILT_IN_FORGE_API_KEY ?? "",
 
+  /** TradeWatch REST API (https://tradewatch.io/docs). Required for `market.*` tRPC procedures. */
+  tradewatchApiKey: process.env.TRADEWATCH_API_KEY?.trim() ?? "",
+  /** Override API host for staging; default production `https://api.tradewatch.io`. */
+  tradewatchBaseUrl: process.env.TRADEWATCH_BASE_URL?.trim() || "https://api.tradewatch.io",
+
   /** OpenAI-compatible chat completions base (no path). Default: OpenAI public API. */
   llmBaseUrl: process.env.LLM_BASE_URL ?? "",
   /** Chat model id for the completions endpoint (must match your LLM_BASE_URL provider). */
