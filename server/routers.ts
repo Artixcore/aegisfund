@@ -12,6 +12,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { prepareExecutiveBriefingRun } from "./agents/briefingOrchestrator";
 import { toAgentErrorMessage } from "./agents/errorMessage";
+import { notifyScheduledAgentOutcome } from "./agents/scheduledAgentNotify";
 import type { AgentFeatureKey } from "./agents/featureStore";
 import { getAgentResponseJsonSchema } from "./agents/outputSchemas";
 import { prepareAgentRun } from "./agents/orchestrator";
@@ -163,6 +164,13 @@ async function runAgentScheduler() {
 
         await updateAgentRun(runId, { status: "complete", output, completedAt: new Date() });
         await updateScheduleAfterRun(schedule.id, schedule.intervalHours);
+        await notifyScheduledAgentOutcome({
+          userId: schedule.userId,
+          agentType: schedule.agentType,
+          ok: true,
+          runId,
+          output,
+        });
       } catch (err) {
         console.error(`[AgentScheduler] Failed to run ${schedule.agentType}:`, err);
         if (runId !== undefined) {
@@ -173,6 +181,13 @@ async function runAgentScheduler() {
           });
         }
         await updateScheduleAfterRun(schedule.id, schedule.intervalHours);
+        await notifyScheduledAgentOutcome({
+          userId: schedule.userId,
+          agentType: schedule.agentType,
+          ok: false,
+          runId,
+          errorMessage: toAgentErrorMessage(err),
+        });
       }
     }
   } catch (err) {
