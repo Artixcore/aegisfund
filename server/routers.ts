@@ -1,6 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import { COOKIE_NAME, DAPP_UNKNOWN_ACCOUNT_MSG, ONE_YEAR_MS } from "@shared/const";
-import { ed25519KeyHex64Schema, ed25519SignatureHex128Schema } from "@shared/dappAuth";
+import {
+  buildDappRegisterReceiveMessage,
+  ed25519KeyHex64Schema,
+  ed25519SignatureHex128Schema,
+} from "@shared/dappAuth";
 import { TRPCError } from "@trpc/server";
 import { generateSecret, generateURI } from "otplib";
 import { nanoid } from "nanoid";
@@ -27,6 +31,7 @@ import { fetchBtcBalance, fetchEthBalance, fetchSolBalance } from "./blockchain"
 import { fetchCryptoSpotPrices, fetchCryptoSpotPriceMap } from "./cryptoPrices";
 import { getBtcRestApiBase, getEthRpcUrl, getSolRpcUrl } from "./wallet/chainEndpoints";
 import { pickPrimaryAddressForChain } from "./wallet/pickPrimaryAddress";
+import { validateReceiveAddresses } from "./wallet/validateReceiveAddresses";
 import {
   createAgentRun,
   createMessage,
@@ -884,7 +889,16 @@ export const appRouter = router({
       return { priorRegistrationOnThisNetwork };
     }),
     registerDapp: publicProcedure
-      .input(z.object({ publicKeyHex: ed25519KeyHex64Schema }))
+      .input(
+        z.object({
+          publicKeyHex: ed25519KeyHex64Schema,
+          btc: z.string().min(14).max(128),
+          eth: z.string().min(10).max(128),
+          sol: z.string().min(32).max(64),
+          btcNetwork: z.enum(["mainnet", "testnet"]),
+          receiveSignatureHex: ed25519SignatureHex128Schema,
+        })
+      )
       .mutation(async ({ ctx, input }) => {
         if (!ENV.cookieSecret?.trim()) {
           throw new TRPCError({
@@ -924,6 +938,38 @@ export const appRouter = router({
           });
         }
 
+        const btc = input.btc.trim();
+        const eth = input.eth.trim().toLowerCase();
+        const sol = input.sol.trim();
+        const addrCheck = validateReceiveAddresses({
+          btc,
+          eth,
+          sol,
+          btcNetwork: input.btcNetwork,
+        });
+        if (!addrCheck.ok) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: addrCheck.message });
+        }
+
+        const receiveMessage = buildDappRegisterReceiveMessage({
+          publicKeyHex: input.publicKeyHex,
+          btc,
+          eth,
+          sol,
+          btcNetwork: input.btcNetwork,
+        });
+        const sigOk = await verifyEd25519Signature(
+          input.publicKeyHex,
+          receiveMessage,
+          input.receiveSignatureHex
+        );
+        if (!sigOk) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Invalid signature for receive addresses",
+          });
+        }
+
         await upsertUser({
           openId: input.publicKeyHex,
           name: null,
@@ -931,6 +977,33 @@ export const appRouter = router({
           loginMethod: "ed25519_dapp",
           lastSignedIn: new Date(),
           registrationIp: clientIp ?? undefined,
+        });
+
+        const created = await getUserByOpenId(input.publicKeyHex);
+        if (!created) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "User was not found after registration",
+          });
+        }
+
+        await upsertWallet({
+          userId: created.id,
+          chain: "BTC",
+          address: btc,
+          label: "Primary",
+        });
+        await upsertWallet({
+          userId: created.id,
+          chain: "ETH",
+          address: eth,
+          label: "Primary",
+        });
+        await upsertWallet({
+          userId: created.id,
+          chain: "SOL",
+          address: sol,
+          label: "Primary",
         });
 
         return { ok: true as const };

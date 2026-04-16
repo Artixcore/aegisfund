@@ -3,6 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   generateEd25519KeypairHex,
@@ -10,8 +17,11 @@ import {
   signUtf8MessageHex,
 } from "@/lib/dappAuth";
 import { trpc } from "@/lib/trpc";
+import { addressesForSettings } from "@/wallet/derive";
+import { generateWalletMnemonic12 } from "@/wallet/index";
+import type { BtcNetworkId } from "@/wallet/types";
 import { DAPP_UNKNOWN_ACCOUNT_MSG } from "@shared/const";
-import { ed25519KeyHex64Schema } from "@shared/dappAuth";
+import { buildDappRegisterReceiveMessage, ed25519KeyHex64Schema } from "@shared/dappAuth";
 import { TRPCClientError } from "@trpc/client";
 import { Copy, Shield } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -41,7 +51,13 @@ export default function Login() {
 
   const [genPublic, setGenPublic] = useState("");
   const [genPrivate, setGenPrivate] = useState("");
+  const [genMnemonic, setGenMnemonic] = useState("");
+  const [receiveBtc, setReceiveBtc] = useState("");
+  const [receiveEth, setReceiveEth] = useState("");
+  const [receiveSol, setReceiveSol] = useState("");
+  const [btcNetwork, setBtcNetwork] = useState<BtcNetworkId>("mainnet");
   const [savedConfirm, setSavedConfirm] = useState(false);
+  const [savedMnemonicConfirm, setSavedMnemonicConfirm] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -62,6 +78,21 @@ export default function Login() {
       navigate("/dashboard");
     }
   }, [isAuthenticated, loading, navigate]);
+
+  useEffect(() => {
+    if (!genMnemonic) return;
+    let cancelled = false;
+    void addressesForSettings(genMnemonic, { accountIndex: 0, btcNetwork }).then((a) => {
+      if (!cancelled) {
+        setReceiveBtc(a.bitcoin);
+        setReceiveEth(a.ethereum);
+        setReceiveSol(a.solana);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [btcNetwork, genMnemonic]);
 
   if (loading) {
     return (
@@ -118,11 +149,25 @@ export default function Login() {
   const onGenerate = async () => {
     setCreateError(null);
     setSavedConfirm(false);
+    setSavedMnemonicConfirm(false);
+    setGenMnemonic("");
+    setReceiveBtc("");
+    setReceiveEth("");
+    setReceiveSol("");
     setCreateBusy(true);
     try {
       const pair = await generateEd25519KeypairHex();
       setGenPublic(pair.publicKeyHex);
       setGenPrivate(pair.privateKeyHex);
+      const mnemonic = generateWalletMnemonic12();
+      setGenMnemonic(mnemonic);
+      const addrs = await addressesForSettings(mnemonic, {
+        accountIndex: 0,
+        btcNetwork,
+      });
+      setReceiveBtc(addrs.bitcoin);
+      setReceiveEth(addrs.ethereum);
+      setReceiveSol(addrs.solana);
     } catch {
       setCreateError("Could not generate keys. Try again.");
     } finally {
@@ -133,19 +178,49 @@ export default function Login() {
   const onRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreateError(null);
-    if (!savedConfirm || !genPublic) {
-      setCreateError("Generate keys and confirm you saved them.");
+    if (!savedConfirm || !savedMnemonicConfirm || !genPublic || !genPrivate || !genMnemonic) {
+      setCreateError("Generate keys, save both backups, and confirm both checkboxes.");
       return;
     }
+    let addrs: Awaited<ReturnType<typeof addressesForSettings>>;
+    try {
+      addrs = await addressesForSettings(genMnemonic, {
+        accountIndex: 0,
+        btcNetwork,
+      });
+    } catch {
+      setCreateError("Could not derive receive addresses. Try generating again.");
+      return;
+    }
+    const receiveMessage = buildDappRegisterReceiveMessage({
+      publicKeyHex: genPublic,
+      btc: addrs.bitcoin,
+      eth: addrs.ethereum,
+      sol: addrs.solana,
+      btcNetwork,
+    });
     setCreateBusy(true);
     try {
-      await registerMutation.mutateAsync({ publicKeyHex: genPublic });
+      const receiveSignatureHex = await signUtf8MessageHex(receiveMessage, genPrivate);
+      await registerMutation.mutateAsync({
+        publicKeyHex: genPublic,
+        btc: addrs.bitcoin,
+        eth: addrs.ethereum,
+        sol: addrs.solana,
+        btcNetwork,
+        receiveSignatureHex,
+      });
       setPublicHex(genPublic);
       setPrivateHex(genPrivate);
       setTab("signin");
       setGenPublic("");
       setGenPrivate("");
+      setGenMnemonic("");
+      setReceiveBtc("");
+      setReceiveEth("");
+      setReceiveSol("");
       setSavedConfirm(false);
+      setSavedMnemonicConfirm(false);
     } catch (err) {
       if (err instanceof TRPCClientError) {
         setCreateError(err.message);
@@ -245,9 +320,23 @@ export default function Login() {
             <TabsContent value="create" className="mt-6 space-y-4">
               <form onSubmit={onRegister} className="space-y-4 aegis-card p-6">
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Keys are generated locally. Anyone with your private key controls this account.
-                  Store both keys offline; the server never sees your private key.
+                  Keys are generated locally. Your Ed25519 keys sign you in; a separate recovery
+                  phrase controls BTC, ETH, and SOL receive addresses. The server never sees your
+                  private key or phrase—only your public key and the three addresses, bound by
+                  signature.
                 </p>
+                <div className="space-y-2">
+                  <Label htmlFor="btc-net">Bitcoin network (for receive address)</Label>
+                  <Select value={btcNetwork} onValueChange={(v) => setBtcNetwork(v as BtcNetworkId)}>
+                    <SelectTrigger id="btc-net" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mainnet">Mainnet</SelectItem>
+                      <SelectItem value="testnet">Testnet</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Button
                   type="button"
                   variant="secondary"
@@ -255,10 +344,41 @@ export default function Login() {
                   onClick={() => void onGenerate()}
                   disabled={createBusy}
                 >
-                  {createBusy && !genPublic ? "Generating…" : "Generate key pair"}
+                  {createBusy && !genPublic ? "Generating…" : "Generate keys & receive addresses"}
                 </Button>
                 {genPublic ? (
                   <>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label>Recovery phrase (BTC / ETH / SOL)</Label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 gap-1 text-xs"
+                          onClick={() => void copyText("recovery phrase", genMnemonic)}
+                        >
+                          <Copy size={12} /> Copy
+                        </Button>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Anyone with this phrase can spend funds sent to your generated receive
+                        addresses. Store it offline, separate from your sign-in keys.
+                      </p>
+                      <Input readOnly className="font-mono text-xs leading-relaxed" value={genMnemonic} />
+                    </div>
+                    <div className="space-y-2 rounded-md border border-border/60 bg-muted/30 p-3">
+                      <p className="text-[11px] font-medium text-foreground">Generated receive addresses</p>
+                      <p className="text-[11px] font-mono break-all text-muted-foreground">
+                        BTC: {receiveBtc}
+                      </p>
+                      <p className="text-[11px] font-mono break-all text-muted-foreground">
+                        ETH: {receiveEth}
+                      </p>
+                      <p className="text-[11px] font-mono break-all text-muted-foreground">
+                        SOL: {receiveSol}
+                      </p>
+                    </div>
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <Label>Public key</Label>
@@ -295,15 +415,33 @@ export default function Login() {
                         onCheckedChange={(c) => setSavedConfirm(c === true)}
                         className="mt-0.5"
                       />
-                      <span>I have saved both keys in a safe place.</span>
+                      <span>I have saved my sign-in keys (public and private) in a safe place.</span>
+                    </label>
+                    <label className="flex items-start gap-2 text-sm text-muted-foreground cursor-pointer">
+                      <Checkbox
+                        checked={savedMnemonicConfirm}
+                        onCheckedChange={(c) => setSavedMnemonicConfirm(c === true)}
+                        className="mt-0.5"
+                      />
+                      <span>I have saved my recovery phrase in a safe place.</span>
                     </label>
                   </>
                 ) : null}
                 {createError ? (
                   <p className="text-sm text-destructive">{createError}</p>
                 ) : null}
-                <Button type="submit" className="w-full" disabled={createBusy || !savedConfirm || !genPublic}>
-                  Register (public key only)
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={
+                    createBusy ||
+                    !savedConfirm ||
+                    !savedMnemonicConfirm ||
+                    !genPublic ||
+                    !genMnemonic
+                  }
+                >
+                  Register account
                 </Button>
               </form>
             </TabsContent>

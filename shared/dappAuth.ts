@@ -44,3 +44,25 @@ export function buildDappLoginMessage(
 ): string {
   return `Aegis Fund login\n${publicKeyHex}\n${nonce}\n${String(expSec)}`;
 }
+
+/** BTC network used when deriving the registration receive address (must match client derivation). */
+export type DappRegisterReceiveBtcNetwork = "mainnet" | "testnet";
+
+/**
+ * UTF-8 message the registering client signs with its Ed25519 private key to bind
+ * receive addresses to this public key. Server rebuilds this string from the request body.
+ */
+export function buildDappRegisterReceiveMessage(params: {
+  publicKeyHex: string;
+  btc: string;
+  eth: string;
+  sol: string;
+  btcNetwork: DappRegisterReceiveBtcNetwork;
+}): string {
+  const publicKeyHex = params.publicKeyHex.toLowerCase();
+  const btc = params.btc.trim();
+  const eth = params.eth.trim().toLowerCase();
+  const sol = params.sol.trim();
+  const { btcNetwork } = params;
+  return `Aegis Fund register-receive/v1\n${publicKeyHex}\n${btcNetwork}\n${btc}\n${eth}\n${sol}`;
+}
