@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { AGENT_RUN_GROUNDING_KEY, type AgentRunGroundingMeta } from "@shared/agentGrounding";
+import { parseGrounding, stripGrounding, type AgentRunGroundingMeta } from "@shared/agentGrounding";
 import {
   Activity,
   AlertTriangle,
@@ -81,33 +81,6 @@ const AGENT_META: Record<AgentType, {
   },
 };
 
-function parseGrounding(output: unknown): AgentRunGroundingMeta | null {
-  if (!output || typeof output !== "object") return null;
-  const o = output as Record<string, unknown>;
-  const g = o[AGENT_RUN_GROUNDING_KEY];
-  if (!g || typeof g !== "object") return null;
-  const rec = g as Record<string, unknown>;
-  const dv = rec.datasetVersion;
-  if (typeof dv !== "string") return null;
-  const meta: AgentRunGroundingMeta = { datasetVersion: dv };
-  const pb = rec.portfolioBook;
-  if (pb && typeof pb === "object") {
-    const p = pb as Record<string, unknown>;
-    meta.portfolioBook = {
-      asOf: typeof p.asOf === "string" ? p.asOf : "",
-      positionCount: typeof p.positionCount === "number" ? p.positionCount : 0,
-      activeAlertCount: typeof p.activeAlertCount === "number" ? p.activeAlertCount : 0,
-      totalValueUsd: typeof p.totalValueUsd === "number" ? p.totalValueUsd : 0,
-    };
-  }
-  return meta;
-}
-
-function stripGrounding(output: Record<string, unknown>): Record<string, unknown> {
-  const { [AGENT_RUN_GROUNDING_KEY]: _, ...rest } = output;
-  return rest;
-}
-
 function formatUsdCompact(n: number): string {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -124,9 +97,11 @@ function GroundingStrip({
   accentColor: string;
 }) {
   const pb = grounding.portfolioBook;
+  const bookMode = pb?.bookMode ?? "live";
   const asOfLabel = pb?.asOf
     ? new Date(pb.asOf).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
     : null;
+  const isLight = bookMode === "light";
 
   return (
     <div
@@ -136,6 +111,14 @@ function GroundingStrip({
       <div className="flex items-center gap-2">
         <BookMarked size={12} className="shrink-0" style={{ color: accentColor }} />
         <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground">Grounding</span>
+        {pb && (
+          <span
+            className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${isLight ? "bg-muted text-muted-foreground" : "text-foreground/80"}`}
+            style={isLight ? {} : { background: `${accentColor}18` }}
+          >
+            {isLight ? "stored NAV" : "live chain"}
+          </span>
+        )}
       </div>
       <div className="text-[10px] font-mono text-muted-foreground leading-relaxed">
         <span className="text-foreground/90">Snapshot</span>{" "}
@@ -144,8 +127,17 @@ function GroundingStrip({
       {pb ? (
         <div className="text-[10px] font-mono text-muted-foreground leading-relaxed space-y-0.5">
           <div>
-            <span className="text-foreground/90">Live book</span> · {pb.positionCount} tracked wallet
-            {pb.positionCount !== 1 ? "s" : ""} · ~{formatUsdCompact(pb.totalValueUsd)} at spot marks
+            {isLight ? (
+              <>
+                <span className="text-foreground/90">Scheduled book</span> · {pb.positionCount} wallet row
+                {pb.positionCount !== 1 ? "s" : ""} on file · last NAV ~{formatUsdCompact(pb.totalValueUsd)} (no RPC this run)
+              </>
+            ) : (
+              <>
+                <span className="text-foreground/90">Live book</span> · {pb.positionCount} tracked wallet
+                {pb.positionCount !== 1 ? "s" : ""} · ~{formatUsdCompact(pb.totalValueUsd)} at spot marks
+              </>
+            )}
           </div>
           <div>
             <span className="text-foreground/90">Alerts</span> · {pb.activeAlertCount} active price alert
@@ -153,7 +145,7 @@ function GroundingStrip({
             {asOfLabel ? (
               <>
                 {" "}
-                · marks <span className="text-foreground/70">{asOfLabel}</span>
+                · book as of <span className="text-foreground/70">{asOfLabel}</span>
               </>
             ) : null}
           </div>
@@ -380,6 +372,8 @@ function HistoryPanel({
                       {grounding.portfolioBook ? (
                         <>
                           <span className="text-border">·</span>
+                          <span>{grounding.portfolioBook.bookMode === "light" ? "NAV" : "live"}</span>
+                          <span className="text-border">·</span>
                           <span>{grounding.portfolioBook.positionCount} wallets</span>
                           <span className="text-border">·</span>
                           <span>{formatUsdCompact(grounding.portfolioBook.totalValueUsd)}</span>
@@ -595,8 +589,13 @@ export default function Agents() {
   const totalComplete = agentRuns?.filter((r) => r.status === "complete").length ?? 0;
   const totalRunning = runningAgents.size + (agentRuns?.filter((r) => r.status === "running" || r.status === "analyzing").length ?? 0);
   const totalScheduled = schedules?.filter((s) => s.isActive).length ?? 0;
-  const agentsWithLiveBook =
-    agentRuns?.filter((r) => parseGrounding(r.output)?.portfolioBook != null).length ?? 0;
+  const agentsWithLiveChainBook =
+    agentRuns?.filter((r) => {
+      const pb = parseGrounding(r.output)?.portfolioBook;
+      return pb != null && pb.bookMode !== "light";
+    }).length ?? 0;
+  const agentsWithNavOnlyBook =
+    agentRuns?.filter((r) => parseGrounding(r.output)?.portfolioBook?.bookMode === "light").length ?? 0;
 
   return (
     <div className="p-6 space-y-6 animate-fade-up">
@@ -669,12 +668,20 @@ export default function Agents() {
                   {sched.intervalHours}h
                 </div>
               )}
-              {parseGrounding(run?.output)?.portfolioBook != null && (
-                <div className="flex items-center justify-center gap-0.5 text-[8px] font-mono text-muted-foreground/90" title="Last run includes live portfolio book">
-                  <BookMarked size={8} style={{ color: meta.color }} />
-                  <span>book</span>
-                </div>
-              )}
+              {(() => {
+                const pb = parseGrounding(run?.output)?.portfolioBook;
+                if (!pb) return null;
+                const navOnly = pb.bookMode === "light";
+                return (
+                  <div
+                    className="flex items-center justify-center gap-0.5 text-[8px] font-mono text-muted-foreground/90"
+                    title={navOnly ? "Last run used stored NAV book (no chain RPC)" : "Last run includes live chain portfolio book"}
+                  >
+                    <BookMarked size={8} style={{ color: meta.color }} />
+                    <span>{navOnly ? "NAV" : "live"}</span>
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
@@ -751,8 +758,8 @@ export default function Agents() {
               <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
                 <BookMarked size={10} />
                 <span>
-                  {agentsWithLiveBook > 0
-                    ? `${agentsWithLiveBook} latest run${agentsWithLiveBook !== 1 ? "s" : ""} include live portfolio book + alerts context`
+                  {agentsWithLiveChainBook + agentsWithNavOnlyBook > 0
+                    ? `${agentsWithLiveChainBook} live chain · ${agentsWithNavOnlyBook} stored NAV (scheduled) · grounding on latest runs`
                     : "Complete a run to attach portfolio book grounding (wallets, marks, alerts)"}
                 </span>
               </div>

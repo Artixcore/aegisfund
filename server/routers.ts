@@ -11,7 +11,9 @@ import { generateSecret, generateURI } from "otplib";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { toAgentErrorMessage } from "./agents/errorMessage";
+import { getAgentResponseJsonSchema } from "./agents/outputSchemas";
 import { prepareAgentRun } from "./agents/orchestrator";
+import type { AgentFeatureKey } from "./agents/featureStore";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
@@ -132,7 +134,10 @@ async function runAgentScheduler() {
     for (const schedule of dueSchedules) {
       let runId: number | undefined;
       try {
-        const prepared = await prepareAgentRun(schedule.agentType, { userId: schedule.userId });
+        const prepared = await prepareAgentRun(schedule.agentType, {
+          userId: schedule.userId,
+          portfolioBookMode: "light",
+        });
         const userPreview = prepared.messages[1]?.content?.substring(0, 180) ?? "";
         runId = await createAgentRun({
           userId: schedule.userId,
@@ -143,14 +148,7 @@ async function runAgentScheduler() {
 
         const response = await invokeLLM({
           messages: prepared.messages,
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: prepared.responseSchemaName,
-              strict: false,
-              schema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"], additionalProperties: true },
-            },
-          },
+          response_format: agentJsonResponseFormat(schedule.agentType),
         });
 
         const rawMsg = response?.choices?.[0]?.message?.content;
@@ -468,6 +466,18 @@ const messagesRouter = router({
 // AGENTS ROUTER (with scheduling + history)
 // ============================================================
 
+function agentJsonResponseFormat(agentType: AgentFeatureKey) {
+  const js = getAgentResponseJsonSchema(agentType);
+  return {
+    type: "json_schema" as const,
+    json_schema: {
+      name: js.name,
+      strict: js.strict,
+      schema: js.schema,
+    },
+  };
+}
+
 const agentsRouter = router({
   getAgentStatuses: protectedProcedure.query(async ({ ctx }) => {
     return getLatestAgentRuns(ctx.user.id);
@@ -516,14 +526,7 @@ const agentsRouter = router({
 
         const response = await invokeLLM({
           messages: prepared.messages,
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: prepared.responseSchemaName,
-              strict: false,
-              schema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"], additionalProperties: true },
-            },
-          },
+          response_format: agentJsonResponseFormat(input.agentType),
         });
 
         const rawMsg = response?.choices?.[0]?.message?.content;

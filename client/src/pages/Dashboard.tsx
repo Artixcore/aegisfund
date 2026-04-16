@@ -1,17 +1,20 @@
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import SparklineChart from "@/components/SparklineChart";
+import { parseGrounding } from "@shared/agentGrounding";
 import {
   ArrowDownRight,
   ArrowUpRight,
   Activity,
   AlertTriangle,
   BarChart3,
+  BookMarked,
   Bot,
   RefreshCw,
   TrendingUp,
   Zap,
 } from "lucide-react";
+import { Link } from "wouter";
 import {
   Area,
   AreaChart,
@@ -102,7 +105,9 @@ export default function Dashboard() {
     refetchInterval: 60_000,
   });
   const { data: portfolio, isLoading: portfolioLoading } = trpc.portfolio.getSummary.useQuery();
-  const { data: agentStatuses } = trpc.agents.getAgentStatuses.useQuery();
+  const { data: agentStatuses } = trpc.agents.getAgentStatuses.useQuery(undefined, {
+    refetchInterval: 60_000,
+  });
   const { data: historyData, isLoading: historyLoading } = trpc.portfolio.getHistory.useQuery({ days: historyDays });
 
   const btc = prices?.BTC;
@@ -118,6 +123,16 @@ export default function Dashboard() {
     if (st === "running" || st === "analyzing") runningAgentTypes += 1;
     else if (st === "complete") completeAgentTypes += 1;
     else otherAgentTypes += 1;
+  }
+
+  let dashboardLiveBookAgents = 0;
+  let dashboardNavBookAgents = 0;
+  for (const t of AGENT_TYPES) {
+    const run = agentRunByType.get(t);
+    const pb = parseGrounding(run?.output)?.portfolioBook;
+    if (!pb) continue;
+    if (pb.bookMode === "light") dashboardNavBookAgents += 1;
+    else dashboardLiveBookAgents += 1;
   }
 
   const allocationData = portfolio
@@ -238,7 +253,15 @@ export default function Dashboard() {
 
         {/* Agent status */}
         <div className="aegis-card">
-          <div className="mono-label mb-3">Intelligence Agents</div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="mono-label">Intelligence Agents</div>
+            <Link
+              href="/agents"
+              className="text-[10px] font-mono text-muted-foreground hover:text-foreground border border-border rounded px-2 py-0.5 transition-colors"
+            >
+              Open
+            </Link>
+          </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -262,10 +285,26 @@ export default function Dashboard() {
               <span className="text-sm font-mono font-medium">{otherAgentTypes}</span>
             </div>
           </div>
-          <div className="mt-3 pt-3 border-t border-border">
+          <div className="mt-3 pt-3 border-t border-border space-y-2">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
               <Zap size={10} />
               <span>{AGENT_TYPES.length} agent types · {agentStatuses?.length ?? 0} with run history</span>
+            </div>
+            <div className="flex items-start gap-2 text-[10px] font-mono text-muted-foreground leading-relaxed">
+              <BookMarked size={10} className="shrink-0 mt-0.5 text-foreground/60" />
+              <span>
+                {dashboardLiveBookAgents + dashboardNavBookAgents > 0 ? (
+                  <>
+                    Latest runs:{" "}
+                    <span className="text-foreground/85">{dashboardLiveBookAgents} live chain book</span>
+                    {" · "}
+                    <span className="text-foreground/85">{dashboardNavBookAgents} stored NAV (scheduled)</span>
+                    . Manual runs refresh balances; schedules skip RPC.
+                  </>
+                ) : (
+                  <>Run an agent from the Agents desk to attach portfolio book context to reports.</>
+                )}
+              </span>
             </div>
           </div>
         </div>

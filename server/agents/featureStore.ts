@@ -7,7 +7,7 @@ import {
   getWalletsByUserId,
 } from "../db";
 
-export const DATASET_VERSION = "aegis-features-2026-04-16.2";
+export const DATASET_VERSION = "aegis-features-2026-04-16.3";
 
 export type AgentFeatureKey =
   | "market_analysis"
@@ -51,6 +51,10 @@ export type AgentPortfolioBook = {
     condition: "above" | "below";
     threshold: string;
   }>;
+  /** `live` = on-chain balances fetched; `light` = scheduled run, stored NAV only (no RPC). */
+  bookMode?: "live" | "light";
+  /** Saved wallet rows for this user (same for live and light). */
+  walletRowsTracked?: number;
 };
 
 export type AgentFeatureSnapshot = {
@@ -64,6 +68,8 @@ export type AgentFeatureSnapshot = {
 
 export type BuildFeatureSnapshotOptions = {
   userId?: number;
+  /** `light` skips live chain RPC (for scheduled runs); uses last hourly NAV + alerts. */
+  portfolioBookMode?: "live" | "light";
 };
 
 type YahooSpec = { yahoo: string; key: string };
@@ -245,6 +251,75 @@ async function buildPortfolioBook(
     lastStoredSnapshot,
     recentNavSamples,
     activePriceAlerts,
+    bookMode: "live",
+    walletRowsTracked: walletRows.length,
+  };
+}
+
+/** Scheduled runs: no chain RPC; NAV from last `portfolio_snapshots` row + alert context. */
+async function buildPortfolioBookLight(
+  userId: number,
+  navMarks: Record<string, { usd: number }>,
+): Promise<AgentPortfolioBook> {
+  const asOf = new Date().toISOString();
+  const spotMarkPrices: AgentPortfolioBook["spotMarkPrices"] = {
+    BTC: navMarks.BTC?.usd,
+    ETH: navMarks.ETH?.usd,
+    SOL: navMarks.SOL?.usd,
+  };
+
+  const [walletRows, latestSnap, history, alerts] = await Promise.all([
+    getWalletsByUserId(userId),
+    getLatestPortfolioSnapshot(userId),
+    getPortfolioHistory(userId, 14),
+    getPriceAlertsByUserId(userId),
+  ]);
+
+  const totalsByChain: AgentPortfolioBook["totalsByChain"] = {
+    BTC: { native: 0, usd: 0 },
+    ETH: { native: 0, usd: 0 },
+    SOL: { native: 0, usd: 0 },
+  };
+
+  let lastStoredSnapshot: AgentPortfolioBook["lastStoredSnapshot"] = null;
+  if (latestSnap?.snapshotAt) {
+    const t = new Date(latestSnap.snapshotAt).getTime();
+    const ageMs = Date.now() - t;
+    lastStoredSnapshot = {
+      totalValueUsd: Number(latestSnap.totalValueUsd ?? 0),
+      snapshotAt: new Date(latestSnap.snapshotAt).toISOString(),
+      ageHoursApprox: Math.max(0, Math.round(ageMs / 3600_000)),
+    };
+  }
+
+  const tail = history.slice(-6);
+  const recentNavSamples = tail.map((row) => ({
+    totalValueUsd: Number(row.totalValueUsd ?? 0),
+    snapshotAt: new Date(row.snapshotAt).toISOString(),
+  }));
+
+  const activePriceAlerts = alerts
+    .filter((a) => a.isActive)
+    .slice(0, 20)
+    .map((a) => ({
+      symbol: a.symbol,
+      condition: a.condition,
+      threshold: String(a.threshold),
+    }));
+
+  const totalValueUsd = lastStoredSnapshot?.totalValueUsd ?? 0;
+
+  return {
+    asOf,
+    spotMarkPrices,
+    positions: [],
+    totalsByChain,
+    totalValueUsd,
+    lastStoredSnapshot,
+    recentNavSamples,
+    activePriceAlerts,
+    bookMode: "light",
+    walletRowsTracked: walletRows.length,
   };
 }
 
@@ -309,29 +384,60 @@ export async function buildFeatureSnapshot(
     if (!navMarks.BTC && !navMarks.ETH && !navMarks.SOL) {
       notes.push("NAV marks unavailable; portfolioBook USD figures may be zero — do not fabricate marks.");
     }
-    portfolioBook = await buildPortfolioBook(options.userId, navMarks);
-    citations.push({
-      id: "user-chain-balances",
-      label: "Live on-chain balances for user wallet rows (Esplora / eth_getBalance / getBalance)",
-      source: "internal:blockchain/balance-fetch",
-      retrievedAt: new Date().toISOString(),
-    });
-    citations.push({
-      id: "db-portfolio-snapshots",
-      label: "Stored portfolio_snapshots NAV trail for this user",
-      source: "internal:db/portfolio_snapshots",
-      retrievedAt: new Date().toISOString(),
-    });
-    if (portfolioBook.activePriceAlerts.length > 0) {
+    const bookMode = options.portfolioBookMode ?? "live";
+    if (bookMode === "light") {
+      portfolioBook = await buildPortfolioBookLight(options.userId, navMarks);
       citations.push({
-        id: "db-price-alerts",
-        label: "Active user price_alerts rows",
-        source: "internal:db/price_alerts",
+        id: "scheduled-stored-nav-book",
+        label: "Scheduled run: book uses stored NAV + alerts only (no live chain balance fetch)",
+        source: "internal:db/portfolio_snapshots+price_alerts",
         retrievedAt: new Date().toISOString(),
       });
-    }
-    if (portfolioBook.positions.length === 0) {
-      notes.push("User has no saved wallet rows; portfolioBook exposure is empty.");
+      citations.push({
+        id: "db-portfolio-snapshots",
+        label: "Stored portfolio_snapshots NAV trail for this user",
+        source: "internal:db/portfolio_snapshots",
+        retrievedAt: new Date().toISOString(),
+      });
+      if (portfolioBook.activePriceAlerts.length > 0) {
+        citations.push({
+          id: "db-price-alerts",
+          label: "Active user price_alerts rows",
+          source: "internal:db/price_alerts",
+          retrievedAt: new Date().toISOString(),
+        });
+      }
+      notes.push(
+        "Scheduled agent run: on-chain balances were not refreshed; use portfolioBook.totalValueUsd, lastStoredSnapshot, and recentNavSamples for exposure context.",
+      );
+      if ((portfolioBook.walletRowsTracked ?? 0) === 0) {
+        notes.push("User has no saved wallet rows; book is NAV and alerts only.");
+      }
+    } else {
+      portfolioBook = await buildPortfolioBook(options.userId, navMarks);
+      citations.push({
+        id: "user-chain-balances",
+        label: "Live on-chain balances for user wallet rows (Esplora / eth_getBalance / getBalance)",
+        source: "internal:blockchain/balance-fetch",
+        retrievedAt: new Date().toISOString(),
+      });
+      citations.push({
+        id: "db-portfolio-snapshots",
+        label: "Stored portfolio_snapshots NAV trail for this user",
+        source: "internal:db/portfolio_snapshots",
+        retrievedAt: new Date().toISOString(),
+      });
+      if (portfolioBook.activePriceAlerts.length > 0) {
+        citations.push({
+          id: "db-price-alerts",
+          label: "Active user price_alerts rows",
+          source: "internal:db/price_alerts",
+          retrievedAt: new Date().toISOString(),
+        });
+      }
+      if (portfolioBook.positions.length === 0) {
+        notes.push("User has no saved wallet rows; portfolioBook exposure is empty.");
+      }
     }
   }
 

@@ -16,9 +16,13 @@ vi.mock("./_core/llm", () => ({
       message: {
         content: JSON.stringify({
           summary: "Test market analysis: moderate bullish bias with elevated volatility.",
-          confidence_level: 72,
+          macro_trends: "Equities firm; crypto range-bound; commodities mixed.",
+          volatility_regime: "Elevated vs 30d median.",
+          sentiment_score: 62,
           risk_factors: ["Fed policy uncertainty", "Geopolitical tensions"],
           investment_thesis: "Cautiously bullish on risk assets with tight stops.",
+          confidence_level: 72,
+          citations: ["yf-mirror", "user-chain-balances"],
         }),
       },
     }],

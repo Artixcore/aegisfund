@@ -23,9 +23,11 @@ function groundingMetaFromFeatures(features: AgentFeatureSnapshot): AgentRunGrou
     portfolioBook: pb
       ? {
           asOf: pb.asOf,
-          positionCount: pb.positions.length,
+          positionCount: pb.walletRowsTracked ?? pb.positions.length,
           activeAlertCount: pb.activePriceAlerts.length,
           totalValueUsd: pb.totalValueUsd,
+          bookMode: pb.bookMode ?? "live",
+          walletRowsTracked: pb.walletRowsTracked,
         }
       : undefined,
   };
@@ -44,7 +46,7 @@ export async function prepareAgentRun(
 
   const userBlock = [
     "Use the following FEATURE_SNAPSHOT as the only authoritative numeric market context.",
-    "When `portfolioBook` is present, it is authoritative for this user's tracked wallet balances (native + USD marks), stored NAV samples, and active price alerts — relate conclusions to that exposure when relevant; never infer holdings beyond it.",
+    "When `portfolioBook` is present, it is authoritative for this user's exposure context. If `portfolioBook.bookMode` is `light`, chain balances were not fetched this run — use totalValueUsd, lastStoredSnapshot, recentNavSamples, and alerts only; if `live`, use positions and totals.",
     "Include a top-level JSON field `citations` repeating the snapshot citation ids you relied on.",
     "FEATURE_SNAPSHOT:",
     JSON.stringify(features, null, 2),
