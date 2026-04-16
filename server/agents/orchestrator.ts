@@ -47,6 +47,8 @@ export async function prepareAgentRun(
   const userBlock = [
     "Use the following FEATURE_SNAPSHOT as the only authoritative numeric market context.",
     "When `portfolioBook` is present, it is authoritative for this user's exposure context. If `portfolioBook.bookMode` is `light`, chain balances were not fetched this run — use totalValueUsd, lastStoredSnapshot, recentNavSamples, and alerts only; if `live`, use positions and totals.",
+    "When `tradeWatchBook` exists with `enabled: true`, each entry in `tradeWatchBook.assets` is authoritative for that symbol's TradeWatch REST marks (currentPrice, bid/ask), deterministic `trendSummary`, `historicalOverview`, `changePctWindow`, and `marketObservations`. When `enabled: false`, read `reason` and fall back to Yahoo `prices` only.",
+    "If both Yahoo `prices` and TradeWatch rows exist for a loosely related benchmark, prefer TradeWatch for that symbol's row and Yahoo for legacy keys (BTC, SPX, etc.); cite `tradewatch-rest` and `yf-mirror` as appropriate.",
     "Include a top-level JSON field `citations` repeating the snapshot citation ids you relied on.",
     "FEATURE_SNAPSHOT:",
     JSON.stringify(features, null, 2),

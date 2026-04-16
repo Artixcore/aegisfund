@@ -1,5 +1,43 @@
 import type { AgentFeatureKey } from "./featureStore";
 
+const structuredMarketReportSchema = {
+  type: "object",
+  description:
+    "Optional TradeWatch-aligned digest from FEATURE_SNAPSHOT.tradeWatchBook; omit or keep minimal if disabled or errors.",
+  properties: {
+    generatedAt: { type: "string" },
+    assets: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          assetName: { type: "string" },
+          symbol: { type: "string" },
+          category: { type: "string" },
+          currentPrice: { type: "number" },
+          priceChangePct: { type: "number" },
+          trendSummary: { type: "string" },
+          historicalOverview: { type: "string" },
+          marketObservations: { type: "array", items: { type: "string" } },
+          timestamp: { type: "string" },
+        },
+        required: [
+          "assetName",
+          "symbol",
+          "category",
+          "trendSummary",
+          "historicalOverview",
+          "marketObservations",
+          "timestamp",
+        ],
+        additionalProperties: true,
+      },
+    },
+  },
+  required: ["generatedAt", "assets"],
+  additionalProperties: true,
+} as const;
+
 const citationsProp = {
   type: "array",
   items: { type: "string" },
@@ -28,6 +66,7 @@ export function getAgentResponseJsonSchema(agentType: AgentFeatureKey): {
         investment_thesis: { type: "string" },
         confidence_level: { type: "number" },
         citations: citationsProp,
+        structured_market_report: structuredMarketReportSchema,
       },
       required: [
         "summary",
@@ -70,6 +109,7 @@ export function getAgentResponseJsonSchema(agentType: AgentFeatureKey): {
           },
         },
         citations: citationsProp,
+        structured_market_report: structuredMarketReportSchema,
       },
       required: [
         "summary",
@@ -113,6 +153,7 @@ export function getAgentResponseJsonSchema(agentType: AgentFeatureKey): {
         key_events: { type: "array", items: { type: "string" } },
         overall_usd_bias: { type: "string" },
         citations: citationsProp,
+        structured_market_report: structuredMarketReportSchema,
       },
       required: [
         "summary",
@@ -142,6 +183,7 @@ export function getAgentResponseJsonSchema(agentType: AgentFeatureKey): {
         equity_futures: { type: "string" },
         overall_risk_tone: { type: "string" },
         citations: citationsProp,
+        structured_market_report: structuredMarketReportSchema,
       },
       required: [
         "summary",
@@ -171,6 +213,7 @@ export function getAgentResponseJsonSchema(agentType: AgentFeatureKey): {
         desk_alignment: { type: "string" },
         confidence_level: { type: "number" },
         citations: citationsProp,
+        structured_market_report: structuredMarketReportSchema,
       },
       required: [
         "executive_summary",
@@ -200,6 +243,7 @@ export function getAgentResponseJsonSchema(agentType: AgentFeatureKey): {
         long_range_outlook: { type: "string" },
         historical_confidence: { type: "number" },
         citations: citationsProp,
+        structured_market_report: structuredMarketReportSchema,
       },
       required: [
         "summary",
