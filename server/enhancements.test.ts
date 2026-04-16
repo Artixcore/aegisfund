@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { invokeLLM } from "./_core/llm";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
@@ -78,6 +79,7 @@ vi.mock("./db", async (importOriginal) => {
       { id: 1, userId: 1, agentType: "market_analysis", status: "complete", taskDescription: "Market analysis", output: { summary: "Bullish" }, completedAt: new Date() },
       { id: 2, userId: 1, agentType: "market_analysis", status: "complete", taskDescription: "Market analysis", output: { summary: "Neutral" }, completedAt: new Date(Date.now() - 86400_000) },
     ]),
+    getPortfolioHistory: vi.fn().mockResolvedValue([]),
     createAgentRun: vi.fn().mockResolvedValue(42),
     updateAgentRun: vi.fn().mockResolvedValue(undefined),
     getConversationsByUserId: vi.fn().mockResolvedValue([]),
@@ -245,6 +247,10 @@ describe("agents.runAgent", () => {
     expect(result.output).toBeDefined();
     expect(typeof result.output.summary).toBe("string");
     expect((result.output.summary as string).length).toBeGreaterThan(0);
+
+    const userMsg = vi.mocked(invokeLLM).mock.calls[0]?.[0]?.messages?.[1]?.content ?? "";
+    expect(userMsg).toContain("portfolioBook");
+    expect(userMsg).toContain("user-chain-balances");
   });
 });
 

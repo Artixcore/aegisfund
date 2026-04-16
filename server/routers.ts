@@ -131,7 +131,7 @@ async function runAgentScheduler() {
     for (const schedule of dueSchedules) {
       let runId: number | undefined;
       try {
-        const prepared = await prepareAgentRun(schedule.agentType);
+        const prepared = await prepareAgentRun(schedule.agentType, { userId: schedule.userId });
         const userPreview = prepared.messages[1]?.content?.substring(0, 180) ?? "";
         runId = await createAgentRun({
           userId: schedule.userId,
@@ -500,7 +500,7 @@ const agentsRouter = router({
       agentType: z.enum(["market_analysis", "crypto_monitoring", "forex_monitoring", "futures_commodities", "historical_research"]),
     }))
     .mutation(async ({ ctx, input }) => {
-      const prepared = await prepareAgentRun(input.agentType);
+      const prepared = await prepareAgentRun(input.agentType, { userId: ctx.user.id });
       const preview = prepared.messages[1]?.content?.substring(0, 200) ?? "";
 
       const runId = await createAgentRun({

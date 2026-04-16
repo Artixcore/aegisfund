@@ -1,6 +1,13 @@
+import { fetchBtcBalance, fetchEthBalance, fetchSolBalance } from "../blockchain";
 import { callDataApi } from "../_core/dataApi";
+import {
+  getLatestPortfolioSnapshot,
+  getPortfolioHistory,
+  getPriceAlertsByUserId,
+  getWalletsByUserId,
+} from "../db";
 
-export const DATASET_VERSION = "aegis-features-2026-04-16.1";
+export const DATASET_VERSION = "aegis-features-2026-04-16.2";
 
 export type AgentFeatureKey =
   | "market_analysis"
@@ -17,12 +24,46 @@ export type FeatureCitation = {
   retrievedAt: string;
 };
 
+/** Live + stored user context for exposure-aware agent output (optional). */
+export type AgentPortfolioBook = {
+  asOf: string;
+  /** BTC/ETH/SOL USD marks used to value native balances (same route as agent benchmark prices). */
+  spotMarkPrices: { BTC?: number; ETH?: number; SOL?: number };
+  positions: Array<{
+    chain: "BTC" | "ETH" | "SOL";
+    walletLabel: string | null;
+    addressDisplay: string;
+    balanceNative: number;
+    valueUsd: number;
+    balanceError?: string;
+  }>;
+  totalsByChain: Record<string, { native: number; usd: number }>;
+  totalValueUsd: number;
+  lastStoredSnapshot: null | {
+    totalValueUsd: number;
+    snapshotAt: string;
+    ageHoursApprox: number;
+  };
+  /** Ascending time order, up to 6 recent hourly (or best-effort) NAV samples from DB. */
+  recentNavSamples: Array<{ totalValueUsd: number; snapshotAt: string }>;
+  activePriceAlerts: Array<{
+    symbol: string;
+    condition: "above" | "below";
+    threshold: string;
+  }>;
+};
+
 export type AgentFeatureSnapshot = {
   datasetVersion: string;
   agentType: AgentFeatureKey;
   prices: Record<string, { usd: number; changePct24h?: number }>;
   citations: FeatureCitation[];
   notes: string[];
+  portfolioBook?: AgentPortfolioBook;
+};
+
+export type BuildFeatureSnapshotOptions = {
+  userId?: number;
 };
 
 type YahooSpec = { yahoo: string; key: string };
@@ -92,11 +133,129 @@ async function fetchSpecs(specs: YahooSpec[]): Promise<AgentFeatureSnapshot["pri
   return prices;
 }
 
+function maskAddressDisplay(address: string): string {
+  const a = address.trim();
+  if (a.length <= 14) return a;
+  return `${a.slice(0, 8)}…${a.slice(-4)}`;
+}
+
+async function fetchBalanceForChain(
+  chain: "BTC" | "ETH" | "SOL",
+  address: string,
+): Promise<{ balanceNative: number; balanceError?: string }> {
+  try {
+    if (chain === "BTC") {
+      const r = await fetchBtcBalance(address);
+      return r.error ? { balanceNative: r.balance, balanceError: r.error } : { balanceNative: r.balance };
+    }
+    if (chain === "ETH") {
+      const r = await fetchEthBalance(address);
+      return r.error ? { balanceNative: r.balance, balanceError: r.error } : { balanceNative: r.balance };
+    }
+    const r = await fetchSolBalance(address);
+    return r.error ? { balanceNative: r.balance, balanceError: r.error } : { balanceNative: r.balance };
+  } catch (e) {
+    return { balanceNative: 0, balanceError: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * User book: live native balances × spot marks, stored NAV trail, active alerts.
+ * Does not invent prices — uses `navMarks` from the same Yahoo mirror as crypto benchmarks.
+ */
+async function buildPortfolioBook(
+  userId: number,
+  navMarks: Record<string, { usd: number }>,
+): Promise<AgentPortfolioBook> {
+  const asOf = new Date().toISOString();
+  const spotMarkPrices: AgentPortfolioBook["spotMarkPrices"] = {
+    BTC: navMarks.BTC?.usd,
+    ETH: navMarks.ETH?.usd,
+    SOL: navMarks.SOL?.usd,
+  };
+
+  const [walletRows, latestSnap, history, alerts] = await Promise.all([
+    getWalletsByUserId(userId),
+    getLatestPortfolioSnapshot(userId),
+    getPortfolioHistory(userId, 14),
+    getPriceAlertsByUserId(userId),
+  ]);
+
+  const positions: AgentPortfolioBook["positions"] = await Promise.all(
+    walletRows.map(async (w) => {
+      const { balanceNative, balanceError } = await fetchBalanceForChain(w.chain, w.address);
+      const px = navMarks[w.chain]?.usd ?? 0;
+      const valueUsd = px > 0 ? balanceNative * px : 0;
+      return {
+        chain: w.chain,
+        walletLabel: w.label ?? null,
+        addressDisplay: maskAddressDisplay(w.address),
+        balanceNative,
+        valueUsd,
+        ...(balanceError ? { balanceError } : {}),
+      };
+    }),
+  );
+
+  const totalsByChain: AgentPortfolioBook["totalsByChain"] = {
+    BTC: { native: 0, usd: 0 },
+    ETH: { native: 0, usd: 0 },
+    SOL: { native: 0, usd: 0 },
+  };
+  for (const p of positions) {
+    const slot = totalsByChain[p.chain] ?? { native: 0, usd: 0 };
+    slot.native += p.balanceNative;
+    slot.usd += p.valueUsd;
+    totalsByChain[p.chain] = slot;
+  }
+  const totalValueUsd = positions.reduce((s, p) => s + p.valueUsd, 0);
+
+  let lastStoredSnapshot: AgentPortfolioBook["lastStoredSnapshot"] = null;
+  if (latestSnap?.snapshotAt) {
+    const t = new Date(latestSnap.snapshotAt).getTime();
+    const ageMs = Date.now() - t;
+    lastStoredSnapshot = {
+      totalValueUsd: Number(latestSnap.totalValueUsd ?? 0),
+      snapshotAt: new Date(latestSnap.snapshotAt).toISOString(),
+      ageHoursApprox: Math.max(0, Math.round(ageMs / 3600_000)),
+    };
+  }
+
+  const tail = history.slice(-6);
+  const recentNavSamples = tail.map((row) => ({
+    totalValueUsd: Number(row.totalValueUsd ?? 0),
+    snapshotAt: new Date(row.snapshotAt).toISOString(),
+  }));
+
+  const activePriceAlerts = alerts
+    .filter((a) => a.isActive)
+    .slice(0, 20)
+    .map((a) => ({
+      symbol: a.symbol,
+      condition: a.condition,
+      threshold: String(a.threshold),
+    }));
+
+  return {
+    asOf,
+    spotMarkPrices,
+    positions,
+    totalsByChain,
+    totalValueUsd,
+    lastStoredSnapshot,
+    recentNavSamples,
+    activePriceAlerts,
+  };
+}
+
 /**
  * Pulls a small, versioned feature snapshot for agent grounding.
  * Wire your self-hosted indexers here as you replace Yahoo/data mirrors.
  */
-export async function buildFeatureSnapshot(agentType: AgentFeatureKey): Promise<AgentFeatureSnapshot> {
+export async function buildFeatureSnapshot(
+  agentType: AgentFeatureKey,
+  options?: BuildFeatureSnapshotOptions,
+): Promise<AgentFeatureSnapshot> {
   const retrievedAt = new Date().toISOString();
   const citations: FeatureCitation[] = [
     {
@@ -134,11 +293,54 @@ export async function buildFeatureSnapshot(agentType: AgentFeatureKey): Promise<
     notes.push("Macro and crypto benchmarks unavailable in this snapshot.");
   }
 
+  let portfolioBook: AgentPortfolioBook | undefined;
+  if (options?.userId != null) {
+    const navMarks: Record<string, { usd: number; changePct24h?: number }> = {};
+    for (const sym of ["BTC", "ETH", "SOL"] as const) {
+      const row = prices[sym];
+      if (row?.usd) navMarks[sym] = row;
+    }
+    if (!navMarks.BTC?.usd || !navMarks.ETH?.usd || !navMarks.SOL?.usd) {
+      const trio = await fetchSpecs(CRYPTO_TRIO);
+      for (const sym of ["BTC", "ETH", "SOL"] as const) {
+        if (!navMarks[sym]?.usd && trio[sym]) navMarks[sym] = trio[sym];
+      }
+    }
+    if (!navMarks.BTC && !navMarks.ETH && !navMarks.SOL) {
+      notes.push("NAV marks unavailable; portfolioBook USD figures may be zero — do not fabricate marks.");
+    }
+    portfolioBook = await buildPortfolioBook(options.userId, navMarks);
+    citations.push({
+      id: "user-chain-balances",
+      label: "Live on-chain balances for user wallet rows (Esplora / eth_getBalance / getBalance)",
+      source: "internal:blockchain/balance-fetch",
+      retrievedAt: new Date().toISOString(),
+    });
+    citations.push({
+      id: "db-portfolio-snapshots",
+      label: "Stored portfolio_snapshots NAV trail for this user",
+      source: "internal:db/portfolio_snapshots",
+      retrievedAt: new Date().toISOString(),
+    });
+    if (portfolioBook.activePriceAlerts.length > 0) {
+      citations.push({
+        id: "db-price-alerts",
+        label: "Active user price_alerts rows",
+        source: "internal:db/price_alerts",
+        retrievedAt: new Date().toISOString(),
+      });
+    }
+    if (portfolioBook.positions.length === 0) {
+      notes.push("User has no saved wallet rows; portfolioBook exposure is empty.");
+    }
+  }
+
   return {
     datasetVersion: DATASET_VERSION,
     agentType,
     prices,
     citations,
     notes,
+    ...(portfolioBook ? { portfolioBook } : {}),
   };
 }
