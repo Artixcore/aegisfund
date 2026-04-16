@@ -1,8 +1,10 @@
 import { trpc } from "@/lib/trpc";
+import { AGENT_RUN_GROUNDING_KEY, type AgentRunGroundingMeta } from "@shared/agentGrounding";
 import {
   Activity,
   AlertTriangle,
   BarChart3,
+  BookMarked,
   Bot,
   Calendar,
   CheckCircle2,
@@ -79,6 +81,90 @@ const AGENT_META: Record<AgentType, {
   },
 };
 
+function parseGrounding(output: unknown): AgentRunGroundingMeta | null {
+  if (!output || typeof output !== "object") return null;
+  const o = output as Record<string, unknown>;
+  const g = o[AGENT_RUN_GROUNDING_KEY];
+  if (!g || typeof g !== "object") return null;
+  const rec = g as Record<string, unknown>;
+  const dv = rec.datasetVersion;
+  if (typeof dv !== "string") return null;
+  const meta: AgentRunGroundingMeta = { datasetVersion: dv };
+  const pb = rec.portfolioBook;
+  if (pb && typeof pb === "object") {
+    const p = pb as Record<string, unknown>;
+    meta.portfolioBook = {
+      asOf: typeof p.asOf === "string" ? p.asOf : "",
+      positionCount: typeof p.positionCount === "number" ? p.positionCount : 0,
+      activeAlertCount: typeof p.activeAlertCount === "number" ? p.activeAlertCount : 0,
+      totalValueUsd: typeof p.totalValueUsd === "number" ? p.totalValueUsd : 0,
+    };
+  }
+  return meta;
+}
+
+function stripGrounding(output: Record<string, unknown>): Record<string, unknown> {
+  const { [AGENT_RUN_GROUNDING_KEY]: _, ...rest } = output;
+  return rest;
+}
+
+function formatUsdCompact(n: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: n >= 100_000 ? 0 : 2,
+  }).format(n);
+}
+
+function GroundingStrip({
+  grounding,
+  accentColor,
+}: {
+  grounding: AgentRunGroundingMeta;
+  accentColor: string;
+}) {
+  const pb = grounding.portfolioBook;
+  const asOfLabel = pb?.asOf
+    ? new Date(pb.asOf).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
+    : null;
+
+  return (
+    <div
+      className="rounded-md border border-border/60 bg-muted/25 px-3 py-2.5 space-y-1.5"
+      style={{ borderLeftWidth: 3, borderLeftColor: accentColor }}
+    >
+      <div className="flex items-center gap-2">
+        <BookMarked size={12} className="shrink-0" style={{ color: accentColor }} />
+        <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground">Grounding</span>
+      </div>
+      <div className="text-[10px] font-mono text-muted-foreground leading-relaxed">
+        <span className="text-foreground/90">Snapshot</span>{" "}
+        <span className="text-foreground/70">{grounding.datasetVersion}</span>
+      </div>
+      {pb ? (
+        <div className="text-[10px] font-mono text-muted-foreground leading-relaxed space-y-0.5">
+          <div>
+            <span className="text-foreground/90">Live book</span> · {pb.positionCount} tracked wallet
+            {pb.positionCount !== 1 ? "s" : ""} · ~{formatUsdCompact(pb.totalValueUsd)} at spot marks
+          </div>
+          <div>
+            <span className="text-foreground/90">Alerts</span> · {pb.activeAlertCount} active price alert
+            {pb.activeAlertCount !== 1 ? "s" : ""}
+            {asOfLabel ? (
+              <>
+                {" "}
+                · marks <span className="text-foreground/70">{asOfLabel}</span>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[10px] font-mono text-muted-foreground">Market data only (no portfolio book on this run).</p>
+      )}
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const configs: Record<string, { label: string; cls: string; dot: string }> = {
     idle: { label: "IDLE", cls: "status-badge status-idle", dot: "pulse-dot pulse-gray" },
@@ -99,7 +185,8 @@ function StatusBadge({ status }: { status: string }) {
 function OutputSection({ output }: { output: Record<string, unknown> | null }) {
   const [expanded, setExpanded] = useState(false);
   if (!output) return null;
-  const { summary, ...rest } = output;
+  const cleaned = stripGrounding(output);
+  const { summary, ...rest } = cleaned;
   const summaryStr = summary !== undefined && summary !== null ? String(summary) : null;
   return (
     <div className="mt-4 space-y-3">
@@ -272,6 +359,7 @@ function HistoryPanel({
             history.map((run, i) => {
               const output = run.output as Record<string, unknown> | null;
               const summary = output?.summary ? String(output.summary) : null;
+              const grounding = parseGrounding(output);
               return (
                 <div key={run.id} className="border border-border/50 rounded-lg p-3 space-y-2">
                   <div className="flex items-center justify-between">
@@ -286,6 +374,26 @@ function HistoryPanel({
                       {run.completedAt ? new Date(run.completedAt).toLocaleString() : "—"}
                     </div>
                   </div>
+                  {grounding && (
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px] font-mono text-muted-foreground border border-border/40 rounded px-2 py-1 bg-muted/20">
+                      <span className="text-foreground/80">{grounding.datasetVersion}</span>
+                      {grounding.portfolioBook ? (
+                        <>
+                          <span className="text-border">·</span>
+                          <span>{grounding.portfolioBook.positionCount} wallets</span>
+                          <span className="text-border">·</span>
+                          <span>{formatUsdCompact(grounding.portfolioBook.totalValueUsd)}</span>
+                          <span className="text-border">·</span>
+                          <span>{grounding.portfolioBook.activeAlertCount} alerts</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-border">·</span>
+                          <span>prices only</span>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {summary && (
                     <p className="text-xs text-muted-foreground leading-relaxed">{summary}</p>
                   )}
@@ -326,6 +434,7 @@ function AgentCard({
   const Icon = meta.icon;
   const status = agentRun?.status ?? "idle";
   const output = agentRun?.output as Record<string, unknown> | null;
+  const grounding = output ? parseGrounding(output) : null;
   const isActive = isRunning || status === "running" || status === "analyzing";
 
   return (
@@ -378,6 +487,10 @@ function AgentCard({
             </p>
           </div>
         </div>
+      )}
+
+      {grounding && status !== "alert" && (
+        <GroundingStrip grounding={grounding} accentColor={meta.color} />
       )}
 
       {/* Output — omit stale JSON when latest run failed */}
@@ -482,6 +595,8 @@ export default function Agents() {
   const totalComplete = agentRuns?.filter((r) => r.status === "complete").length ?? 0;
   const totalRunning = runningAgents.size + (agentRuns?.filter((r) => r.status === "running" || r.status === "analyzing").length ?? 0);
   const totalScheduled = schedules?.filter((s) => s.isActive).length ?? 0;
+  const agentsWithLiveBook =
+    agentRuns?.filter((r) => parseGrounding(r.output)?.portfolioBook != null).length ?? 0;
 
   return (
     <div className="p-6 space-y-6 animate-fade-up">
@@ -552,6 +667,12 @@ export default function Agents() {
                 <div className="flex items-center gap-1 text-[9px] font-mono text-aegis-green">
                   <Timer size={8} />
                   {sched.intervalHours}h
+                </div>
+              )}
+              {parseGrounding(run?.output)?.portfolioBook != null && (
+                <div className="flex items-center justify-center gap-0.5 text-[8px] font-mono text-muted-foreground/90" title="Last run includes live portfolio book">
+                  <BookMarked size={8} style={{ color: meta.color }} />
+                  <span>book</span>
                 </div>
               )}
             </div>
@@ -626,6 +747,14 @@ export default function Agents() {
               <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
                 <Calendar size={10} />
                 <span>{totalScheduled} agent{totalScheduled !== 1 ? "s" : ""} on auto-schedule</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+                <BookMarked size={10} />
+                <span>
+                  {agentsWithLiveBook > 0
+                    ? `${agentsWithLiveBook} latest run${agentsWithLiveBook !== 1 ? "s" : ""} include live portfolio book + alerts context`
+                    : "Complete a run to attach portfolio book grounding (wallets, marks, alerts)"}
+                </span>
               </div>
             </div>
           </div>

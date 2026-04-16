@@ -1,13 +1,35 @@
+import type { AgentRunGroundingMeta } from "@shared/agentGrounding";
 import { AGENT_OUTPUT_GUARDRAIL } from "./guardrails";
 import { AGENT_PROMPTS } from "./prompts";
-import { buildFeatureSnapshot, type AgentFeatureKey, type BuildFeatureSnapshotOptions } from "./featureStore";
+import {
+  buildFeatureSnapshot,
+  type AgentFeatureKey,
+  type AgentFeatureSnapshot,
+  type BuildFeatureSnapshotOptions,
+} from "./featureStore";
 
 export type AgentLlmMessage = { role: "system" | "user"; content: string };
 
-export type AgentRunInput = {
+export type AgentRunPrepared = {
   messages: AgentLlmMessage[];
   responseSchemaName: string;
+  groundingMeta: AgentRunGroundingMeta;
 };
+
+function groundingMetaFromFeatures(features: AgentFeatureSnapshot): AgentRunGroundingMeta {
+  const pb = features.portfolioBook;
+  return {
+    datasetVersion: features.datasetVersion,
+    portfolioBook: pb
+      ? {
+          asOf: pb.asOf,
+          positionCount: pb.positions.length,
+          activeAlertCount: pb.activePriceAlerts.length,
+          totalValueUsd: pb.totalValueUsd,
+        }
+      : undefined,
+  };
+}
 
 /**
  * Builds LLM messages: base prompt + versioned feature snapshot JSON + guardrails.
@@ -16,7 +38,7 @@ export type AgentRunInput = {
 export async function prepareAgentRun(
   agentType: AgentFeatureKey,
   snapshotOptions?: BuildFeatureSnapshotOptions,
-): Promise<AgentRunInput> {
+): Promise<AgentRunPrepared> {
   const prompt = AGENT_PROMPTS[agentType];
   const features = await buildFeatureSnapshot(agentType, snapshotOptions);
 
@@ -42,5 +64,6 @@ export async function prepareAgentRun(
   return {
     messages,
     responseSchemaName: `${agentType}_report`,
+    groundingMeta: groundingMetaFromFeatures(features),
   };
 }

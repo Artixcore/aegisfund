@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { AGENT_RUN_GROUNDING_KEY } from "@shared/agentGrounding";
 import { COOKIE_NAME, DAPP_UNKNOWN_ACCOUNT_MSG, ONE_YEAR_MS } from "@shared/const";
 import {
   buildDappRegisterReceiveMessage,
@@ -156,6 +157,7 @@ async function runAgentScheduler() {
         const rawContent = typeof rawMsg === "string" ? rawMsg : "{}";
         let output: Record<string, unknown> = {};
         try { output = JSON.parse(rawContent); } catch { output = { summary: rawContent }; }
+        output = { ...output, [AGENT_RUN_GROUNDING_KEY]: prepared.groundingMeta };
 
         await updateAgentRun(runId, { status: "complete", output, completedAt: new Date() });
         await updateScheduleAfterRun(schedule.id, schedule.intervalHours);
@@ -528,6 +530,7 @@ const agentsRouter = router({
         const rawContent = typeof rawMsg === "string" ? rawMsg : "{}";
         let output: Record<string, unknown> = {};
         try { output = JSON.parse(rawContent); } catch { output = { summary: rawContent }; }
+        output = { ...output, [AGENT_RUN_GROUNDING_KEY]: prepared.groundingMeta };
 
         await updateAgentRun(runId, { status: "complete", output, completedAt: new Date() });
         return { success: true, runId, output };

@@ -5,3 +5,5 @@
 
 export type * from "../drizzle/schema";
 export * from "./_core/errors";
+export type { AgentRunGroundingMeta } from "./agentGrounding";
+export { AGENT_RUN_GROUNDING_KEY } from "./agentGrounding";
