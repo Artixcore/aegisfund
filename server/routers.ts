@@ -172,7 +172,11 @@ async function runAgentScheduler() {
           output,
         });
       } catch (err) {
-        console.error(`[AgentScheduler] Failed to run ${schedule.agentType}:`, err);
+        const detail = toAgentErrorMessage(err);
+        console.error(
+          `[AgentScheduler] Failed agentType=${schedule.agentType} runId=${runId ?? "none"} userId=${schedule.userId}:`,
+          detail,
+        );
         if (runId !== undefined) {
           await updateAgentRun(runId, {
             status: "alert",
@@ -497,6 +501,19 @@ function agentJsonResponseFormat(agentType: AgentFeatureKey) {
   };
 }
 
+const AGENT_TRPC_DEV_DETAIL_MAX = 280;
+
+function agentTrpcFailureMessage(generic: string, detail: string): string {
+  if (ENV.isProduction) return generic;
+  const d = detail.trim();
+  if (!d) return generic;
+  const clipped =
+    d.length > AGENT_TRPC_DEV_DETAIL_MAX
+      ? `${d.slice(0, AGENT_TRPC_DEV_DETAIL_MAX)}…`
+      : d;
+  return `${generic}: ${clipped}`;
+}
+
 const agentRunTypeSchema = z.enum([
   "market_analysis",
   "crypto_monitoring",
@@ -566,12 +583,20 @@ const agentsRouter = router({
         await updateAgentRun(runId, { status: "complete", output, completedAt: new Date() });
         return { success: true, runId, output };
       } catch (error) {
+        const detail = toAgentErrorMessage(error);
+        console.error(
+          `[runAgent] runId=${runId} agentType=${input.agentType} userId=${ctx.user.id}:`,
+          detail,
+        );
         await updateAgentRun(runId, {
           status: "alert",
           completedAt: new Date(),
-          errorMessage: toAgentErrorMessage(error),
+          errorMessage: detail,
         });
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Agent execution failed" });
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: agentTrpcFailureMessage("Agent execution failed", detail),
+        });
       }
     }),
 
@@ -603,12 +628,17 @@ const agentsRouter = router({
       await updateAgentRun(runId, { status: "complete", output, completedAt: new Date() });
       return { success: true, runId, output };
     } catch (error) {
+      const detail = toAgentErrorMessage(error);
+      console.error(`[runExecutiveBriefing] runId=${runId} userId=${ctx.user.id}:`, detail);
       await updateAgentRun(runId, {
         status: "alert",
         completedAt: new Date(),
-        errorMessage: toAgentErrorMessage(error),
+        errorMessage: detail,
       });
-      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Executive briefing failed" });
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: agentTrpcFailureMessage("Executive briefing failed", detail),
+      });
     }
   }),
 });

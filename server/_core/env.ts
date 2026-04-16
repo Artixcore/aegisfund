@@ -33,6 +33,8 @@ export const ENV = {
 
   /** OpenAI-compatible chat completions base (no path). Default: OpenAI public API. */
   llmBaseUrl: process.env.LLM_BASE_URL ?? "",
+  /** Chat model id for the completions endpoint (must match your LLM_BASE_URL provider). */
+  llmModel: process.env.LLM_MODEL?.trim() || "gemini-2.5-flash",
   llmApiKey:
     process.env.LLM_API_KEY ??
     process.env.OPENAI_API_KEY ??
