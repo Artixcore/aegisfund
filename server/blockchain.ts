@@ -74,7 +74,8 @@ export async function fetchEthBalance(address: string): Promise<ChainBalance> {
   try {
     const apiKey = ENV.etherscanApiKey;
     if (!apiKey) throw new Error("Configure ETH_RPC_URL (self-hosted) or ETHERSCAN_API_KEY (fallback)");
-    const url = `https://api.etherscan.io/v2/api?chainid=1&module=account&action=balance&address=${encodeURIComponent(address)}&tag=latest&apikey=${apiKey}`;
+    const chainId = ENV.etherscanChainId.replace(/\D/g, "") || "1";
+    const url = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=balance&address=${encodeURIComponent(address)}&tag=latest&apikey=${apiKey}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error(`Etherscan API error: ${res.status}`);
     const data = (await res.json()) as { status: string; message: string; result: string };

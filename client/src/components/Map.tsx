@@ -91,6 +91,8 @@ const FORGE_BASE_URL =
   import.meta.env.VITE_FRONTEND_FORGE_API_URL ||
   "https://forge.butterfly-effect.dev";
 const MAPS_PROXY_URL = `${FORGE_BASE_URL}/v1/maps/proxy`;
+/** Google Cloud Map ID for vector / advanced markers; optional. */
+const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID?.trim() ?? "";
 
 function loadMapScript() {
   return new Promise(resolve => {
@@ -138,7 +140,7 @@ export function MapView({
       fullscreenControl: true,
       zoomControl: true,
       streetViewControl: true,
-      mapId: "DEMO_MAP_ID",
+      ...(MAP_ID ? { mapId: MAP_ID } : {}),
     });
     if (onMapReady) {
       onMapReady(map.current);

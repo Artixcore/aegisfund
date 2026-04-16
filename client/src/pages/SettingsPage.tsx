@@ -17,6 +17,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { toast } from "sonner";
 
 type SettingsSection = "profile" | "security" | "notifications" | "wallets" | "agents" | "display";
@@ -30,11 +31,24 @@ const SECTIONS: { id: SettingsSection; label: string; icon: React.ElementType; d
   { id: "display", label: "Display", icon: Monitor, description: "Theme, layout, and interface preferences" },
 ];
 
-function ToggleSwitch({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
+function ToggleSwitch({
+  enabled,
+  onChange,
+  disabled,
+}: {
+  enabled: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
   return (
     <button
-      onClick={() => onChange(!enabled)}
-      className={`relative w-10 h-5.5 rounded-full transition-colors duration-200 ${enabled ? "bg-foreground" : "bg-border"}`}
+      type="button"
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!enabled)}
+      title={disabled ? "Not saved to the server yet" : undefined}
+      className={`relative w-10 h-5.5 rounded-full transition-colors duration-200 ${
+        enabled ? "bg-foreground" : "bg-border"
+      } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
       style={{ height: "22px", width: "40px" }}
     >
       <div
@@ -104,7 +118,12 @@ function ProfileSection() {
         <div>
           <div className="text-sm font-medium">{user?.name ?? "Operator"}</div>
           <div className="text-xs font-mono text-muted-foreground">{user?.email ?? "—"}</div>
-          <button className="text-xs text-muted-foreground hover:text-foreground mt-1 transition-colors">
+          <button
+            type="button"
+            disabled
+            title="Avatar upload is not configured yet"
+            className="text-xs text-muted-foreground mt-1 transition-colors opacity-50 cursor-not-allowed"
+          >
             Change avatar
           </button>
         </div>
@@ -152,6 +171,37 @@ function ProfileSection() {
 }
 
 function SecuritySection() {
+  const items = [
+    {
+      icon: Key,
+      label: "Change Password",
+      description: "Update your account password",
+      action: "Configure",
+      title: "Password change is not wired for this auth method yet",
+    },
+    {
+      icon: Smartphone,
+      label: "Two-Factor Authentication",
+      description: "Add an extra layer of security",
+      action: "Enable",
+      title: "Enable MFA from the API or a dedicated security flow when exposed here",
+    },
+    {
+      icon: Lock,
+      label: "Session Management",
+      description: "View and revoke active sessions",
+      action: "Manage",
+      title: "Open session tools when available",
+    },
+    {
+      icon: Shield,
+      label: "Export Encrypted Backup",
+      description: "Download an encrypted backup of your data",
+      action: "Export",
+      title: "Backup export is not implemented in this UI yet",
+    },
+  ] as const;
+
   return (
     <div className="space-y-6">
       <div>
@@ -160,27 +210,24 @@ function SecuritySection() {
       </div>
 
       <div className="space-y-3">
-        {[
-          { icon: Key, label: "Change Password", description: "Update your account password", action: "Configure" },
-          { icon: Smartphone, label: "Two-Factor Authentication", description: "Add an extra layer of security", action: "Enable" },
-          { icon: Lock, label: "Session Management", description: "View and revoke active sessions", action: "Manage" },
-          { icon: Shield, label: "Export Encrypted Backup", description: "Download an encrypted backup of your data", action: "Export" },
-        ].map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           return (
-            <div key={item.label} className="aegis-card flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-foreground/5 border border-border flex items-center justify-center">
+            <div key={item.label} className="aegis-card flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-foreground/5 border border-border flex items-center justify-center shrink-0">
                   <Icon size={14} className="text-muted-foreground" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <div className="text-sm font-medium">{item.label}</div>
                   <div className="text-xs text-muted-foreground">{item.description}</div>
                 </div>
               </div>
               <button
-                onClick={() => toast.info("Feature coming soon")}
-                className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
+                type="button"
+                disabled
+                title={item.title}
+                className="shrink-0 px-3 py-1.5 rounded-md border border-border text-xs font-mono text-muted-foreground opacity-50 cursor-not-allowed"
               >
                 {item.action}
               </button>
@@ -258,58 +305,81 @@ function NotificationsSection() {
   );
 }
 
+const SETTINGS_CHAIN_META: Record<string, { icon: string; color: string }> = {
+  BTC: { icon: "₿", color: "oklch(0.78 0.12 85)" },
+  ETH: { icon: "Ξ", color: "oklch(0.65 0.15 240)" },
+  SOL: { icon: "◎", color: "oklch(0.72 0.12 195)" },
+};
+
 function WalletsSection() {
-  const WALLETS = [
-    { chain: "BTC", icon: "₿", color: "oklch(0.78 0.12 85)", address: "bc1q0aegisfund0btcwallet0primary0xyzabc", label: "Primary Bitcoin", status: "Connected" },
-    { chain: "ETH", icon: "Ξ", color: "oklch(0.65 0.15 240)", address: "0x0001AegisFundETHWallet1ABCDEF", label: "Primary Ethereum", status: "Connected" },
-    { chain: "SOL", icon: "◎", color: "oklch(0.72 0.12 195)", address: "AegisFund1SolanaWalletAddressXYZ1", label: "Primary Solana", status: "Connected" },
-  ];
+  const [, setLocation] = useLocation();
+  const { data: wallets, isLoading } = trpc.wallet.getWallets.useQuery();
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-base font-semibold mb-1">Connected Wallets</h2>
-        <p className="text-xs text-muted-foreground">Manage your linked blockchain wallet addresses.</p>
+        <p className="text-xs text-muted-foreground">Addresses saved for your account. Full management lives on the Wallets page.</p>
       </div>
-      <div className="space-y-3">
-        {WALLETS.map((w) => (
-          <div key={w.chain} className="aegis-card">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-9 h-9 rounded-lg flex items-center justify-center text-base font-bold"
-                  style={{ background: `${w.color}18`, color: w.color }}
-                >
-                  {w.icon}
+      {isLoading ? (
+        <p className="text-xs font-mono text-muted-foreground">Loading wallets…</p>
+      ) : !wallets || wallets.length === 0 ? (
+        <div className="aegis-card text-sm text-muted-foreground">
+          No wallet addresses on file yet.{" "}
+          <button
+            type="button"
+            onClick={() => setLocation("/wallets")}
+            className="text-foreground underline-offset-2 hover:underline font-medium"
+          >
+            Go to Wallets
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {wallets.map((w) => {
+            const meta = SETTINGS_CHAIN_META[w.chain] ?? { icon: "?", color: "oklch(0.5 0 0)" };
+            return (
+              <div key={w.id} className="aegis-card">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className="w-9 h-9 rounded-lg flex items-center justify-center text-base font-bold shrink-0"
+                      style={{ background: `${meta.color}18`, color: meta.color }}
+                    >
+                      {meta.icon}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{w.label || `${w.chain} wallet`}</div>
+                      <div className="mono-label">{w.chain} Network</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs font-mono text-aegis-green">Saved</span>
+                    <button
+                      type="button"
+                      onClick={() => setLocation("/wallets")}
+                      className="px-2.5 py-1 rounded border border-border text-[11px] font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
+                    >
+                      Manage
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-sm font-medium">{w.label}</div>
-                  <div className="mono-label">{w.chain} Network</div>
+                <div className="mt-3 pt-3 border-t border-border">
+                  <div className="mono-label mb-1">Address</div>
+                  <div className="text-xs font-mono text-muted-foreground break-all">{w.address}</div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono text-aegis-green">{w.status}</span>
-                <button
-                  onClick={() => toast.info("Feature coming soon")}
-                  className="px-2.5 py-1 rounded border border-border text-[11px] font-mono text-muted-foreground hover:text-foreground transition-all"
-                >
-                  Manage
-                </button>
-              </div>
-            </div>
-            <div className="mt-3 pt-3 border-t border-border">
-              <div className="mono-label mb-1">Address</div>
-              <div className="text-xs font-mono text-muted-foreground truncate">{w.address}</div>
-            </div>
-          </div>
-        ))}
-      </div>
+            );
+          })}
+        </div>
+      )}
       <button
-        onClick={() => toast.info("Feature coming soon")}
+        type="button"
+        onClick={() => setLocation("/wallets")}
         className="flex items-center gap-2 px-4 py-2 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
       >
         <Bitcoin size={12} />
-        Add New Wallet
+        Add or edit wallets
       </button>
     </div>
   );
@@ -344,10 +414,14 @@ function AgentsSection() {
             <ToggleSwitch
               enabled={prefs[item.key]}
               onChange={() => setPrefs((p) => ({ ...p, [item.key]: !p[item.key] }))}
+              disabled
             />
           </div>
         ))}
       </div>
+      <p className="text-[11px] font-mono text-muted-foreground">
+        Agent preferences are not persisted to the server yet; controls are disabled until a settings API exists.
+      </p>
     </div>
   );
 }
@@ -366,11 +440,13 @@ function DisplaySection() {
             {["Dark (Default)", "Darker", "Midnight"].map((t, i) => (
               <button
                 key={t}
-                onClick={() => i === 0 ? null : toast.info("Theme coming soon")}
+                type="button"
+                disabled={i !== 0}
+                title={i === 0 ? undefined : "Additional themes are not implemented yet"}
                 className={`px-4 py-2 rounded-md border text-xs font-mono transition-all ${
                   i === 0
                     ? "border-foreground/40 text-foreground bg-foreground/5"
-                    : "border-border text-muted-foreground hover:border-foreground/20"
+                    : "border-border text-muted-foreground opacity-50 cursor-not-allowed"
                 }`}
               >
                 {t}
@@ -391,11 +467,11 @@ function DisplaySection() {
             {["30s", "1m", "5m", "15m"].map((t, i) => (
               <button
                 key={t}
-                onClick={() => i !== 1 ? toast.info("Coming soon") : null}
-                className={`px-3 py-1.5 rounded border text-xs font-mono transition-all ${
-                  i === 1
-                    ? "border-foreground/40 text-foreground"
-                    : "border-border text-muted-foreground hover:border-foreground/20"
+                type="button"
+                disabled
+                title="Refresh interval is not user-configurable yet (app uses fixed intervals)"
+                className={`px-3 py-1.5 rounded border text-xs font-mono transition-all opacity-50 cursor-not-allowed border-border text-muted-foreground ${
+                  i === 1 ? "border-foreground/25" : ""
                 }`}
               >
                 {t}

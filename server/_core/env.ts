@@ -43,6 +43,8 @@ export const ENV = {
   notificationWebhookUrl: process.env.NOTIFICATION_WEBHOOK_URL ?? "",
 
   etherscanApiKey: process.env.ETHERSCAN_API_KEY ?? "",
+  /** Etherscan API v2 `chainid` when using HTTP balance fallback (no ETH_RPC_URL). Default mainnet `1`. */
+  etherscanChainId: process.env.ETHERSCAN_CHAIN_ID?.trim() || "1",
   btcRestApiBase: process.env.BTC_REST_API_BASE ?? "",
   ethRpcUrl: process.env.ETH_RPC_URL ?? "",
   solRpcUrl: process.env.SOL_RPC_URL ?? "",

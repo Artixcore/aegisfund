@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import {
@@ -120,7 +120,11 @@ export async function hasUserRegisteredFromIp(ip: string): Promise<boolean> {
 export async function getWalletsByUserId(userId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(wallets).where(eq(wallets.userId, userId));
+  return db
+    .select()
+    .from(wallets)
+    .where(eq(wallets.userId, userId))
+    .orderBy(asc(wallets.chain), asc(wallets.id));
 }
 
 export async function upsertWallet(data: {
@@ -161,6 +165,40 @@ export async function upsertWallet(data: {
       walletPolicy: data.walletPolicy ?? null,
     });
   }
+}
+
+/** Update a specific saved wallet row (multi-address per chain). */
+export async function updateWalletById(
+  userId: number,
+  walletId: number,
+  data: {
+    address: string;
+    label?: string | null;
+    mpcWalletId?: string | null;
+    custodyModel?: "watch_only" | "mpc";
+    walletPolicy?: Record<string, unknown> | null;
+  }
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const existing = await db
+    .select()
+    .from(wallets)
+    .where(and(eq(wallets.id, walletId), eq(wallets.userId, userId)))
+    .limit(1);
+  if (existing.length === 0) throw new Error("Wallet not found");
+  const row = existing[0]!;
+  const custodyModel = data.custodyModel ?? row.custodyModel ?? "watch_only";
+  await db
+    .update(wallets)
+    .set({
+      address: data.address,
+      label: data.label !== undefined ? data.label : row.label,
+      mpcWalletId: data.mpcWalletId !== undefined ? data.mpcWalletId : row.mpcWalletId,
+      custodyModel,
+      walletPolicy: data.walletPolicy !== undefined ? data.walletPolicy : row.walletPolicy,
+    })
+    .where(and(eq(wallets.id, walletId), eq(wallets.userId, userId)));
 }
 
 export async function deleteWallet(id: number, userId: number) {

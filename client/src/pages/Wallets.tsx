@@ -39,24 +39,6 @@ const CHAIN_META: Record<string, { name: string; icon: string; color: string; ex
   SOL: { name: "Solana", icon: "◎", color: "oklch(0.72 0.12 195)", explorerBase: "https://solscan.io/account/" },
 };
 
-const MOCK_TX: Record<string, Array<{ type: string; amount: string; usd: string; address: string; time: string; hash: string }>> = {
-  BTC: [
-    { type: "receive", amount: "+0.0821 BTC", usd: "+$8,420.18", address: "bc1q...x4f2", time: "2h ago", hash: "a1b2c3d4..." },
-    { type: "send", amount: "-0.12 BTC", usd: "-$12,300.00", address: "bc1q...m9k1", time: "2d ago", hash: "e5f6g7h8..." },
-    { type: "receive", amount: "+0.5 BTC", usd: "+$51,250.00", address: "bc1q...p3r7", time: "5d ago", hash: "i9j0k1l2..." },
-  ],
-  ETH: [
-    { type: "send", amount: "-2.5 ETH", usd: "-$6,125.00", address: "0x...d4e5", time: "5h ago", hash: "q7r8s9t0..." },
-    { type: "receive", amount: "+5.0 ETH", usd: "+$12,250.00", address: "0x...a1b2", time: "3d ago", hash: "u1v2w3x4..." },
-    { type: "receive", amount: "+3.84 ETH", usd: "+$9,408.00", address: "0x...c3d4", time: "7d ago", hash: "y5z6a7b8..." },
-  ],
-  SOL: [
-    { type: "receive", amount: "+48.0 SOL", usd: "+$7,344.00", address: "Aegis...x4f2", time: "1d ago", hash: "g3h4i5j6..." },
-    { type: "send", amount: "-25.0 SOL", usd: "-$3,825.00", address: "Vault...m9k1", time: "4d ago", hash: "k7l8m9n0..." },
-    { type: "receive", amount: "+200.0 SOL", usd: "+$30,600.00", address: "Fund...p3r7", time: "8d ago", hash: "o1p2q3r4..." },
-  ],
-};
-
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -250,9 +232,22 @@ function AddWalletModal({
   );
 }
 
+/** Same rules as server `pickPrimaryAddressForChain`: default row, else lowest id. */
+function pickPrimaryWalletForChain<T extends { id: number; chain: string; address: string; isDefault: boolean | null }>(
+  list: T[],
+  chain: string
+): T | undefined {
+  const rows = list.filter((w) => w.chain === chain);
+  if (rows.length === 0) return undefined;
+  const defaults = rows.filter((w) => w.isDefault);
+  const pool = defaults.length > 0 ? defaults : rows;
+  return pool.reduce((a, b) => (a.id < b.id ? a : b));
+}
+
 export default function Wallets() {
   const utils = trpc.useUtils();
-  const [editingChain, setEditingChain] = useState<string | null>(null);
+  /** Which saved wallet row is being edited (matches list row or primary on card). */
+  const [editingWalletId, setEditingWalletId] = useState<number | null>(null);
   const [showCreateAlert, setShowCreateAlert] = useState(false);
   const [addingWalletChain, setAddingWalletChain] = useState<string | null>(null);
   const [alertTab, setAlertTab] = useState<"active" | "history">("active");
@@ -265,6 +260,12 @@ export default function Wallets() {
   const { data: onChainBalances, isLoading: balancesLoading, refetch: refetchBalances } = trpc.wallet.getOnChainBalances.useQuery(undefined, {
     refetchInterval: 120_000,
   });
+  const {
+    data: txHistory,
+    isLoading: txHistoryLoading,
+    isError: txHistoryError,
+    refetch: refetchTxHistory,
+  } = trpc.wallet.getTransactionHistory.useQuery();
   const { data: alerts, isLoading: alertsLoading } = trpc.alerts.getAlerts.useQuery();
 
   const updateWallet = trpc.wallet.updateWallet.useMutation({
@@ -320,10 +321,13 @@ export default function Wallets() {
 
   const walletMap: Record<string, string> = {};
   if (wallets) {
-    for (const w of wallets) if (!walletMap[w.chain]) walletMap[w.chain] = w.address;
+    for (const chain of ["BTC", "ETH", "SOL"] as const) {
+      const row = pickPrimaryWalletForChain(wallets, chain);
+      if (row) walletMap[chain] = row.address;
+    }
   }
 
-  const editingWallet = wallets?.find((w) => w.chain === editingChain);
+  const editingWallet = wallets?.find((w) => w.id === editingWalletId);
 
   // Group wallets by chain for multi-wallet display
   const walletsByChain: Record<string, typeof wallets> = {};
@@ -339,9 +343,7 @@ export default function Wallets() {
     ((onChainBalances?.ETH?.balance ?? 0) * (prices?.ETH?.price ?? 0)) +
     ((onChainBalances?.SOL?.balance ?? 0) * (prices?.SOL?.price ?? 0));
 
-  const allTx = Object.entries(MOCK_TX).flatMap(([chain, txs]) =>
-    txs.map((tx) => ({ ...tx, chain }))
-  );
+  const txRows = txHistory ?? [];
 
   return (
     <div className="p-4 sm:p-6 space-y-6 animate-fade-up">
@@ -367,7 +369,7 @@ export default function Wallets() {
             </div>
           )}
           <button
-            onClick={() => { refetchPrices(); refetchBalances(); }}
+            onClick={() => { refetchPrices(); refetchBalances(); void refetchTxHistory(); }}
             className="h-10 w-10 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
             title="Refresh all"
           >
@@ -450,7 +452,11 @@ export default function Wallets() {
                   <span className="text-xs font-mono text-muted-foreground break-all sm:truncate flex-1 basis-full sm:basis-auto">{address}</span>
                   <CopyButton text={address} />
                   <button
-                    onClick={() => setEditingChain(chain)}
+                    type="button"
+                    onClick={() => {
+                      const r = wallets ? pickPrimaryWalletForChain(wallets, chain) : undefined;
+                      if (r) setEditingWalletId(r.id);
+                    }}
                     className="h-8 w-8 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
                     title="Edit address"
                   >
@@ -473,21 +479,39 @@ export default function Wallets() {
                 )}
               </div>
 
-              {/* Actions */}
-              <div className="flex flex-col sm:flex-row gap-2">
+              {/* Watch-only: receive uses address above; send requires local signing */}
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    type="button"
+                    disabled
+                    title="Receive using the wallet address shown above"
+                    aria-disabled
+                    className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md border border-border text-xs font-medium opacity-50 cursor-not-allowed"
+                  >
+                    <ArrowDownRight size={13} />
+                    Receive
+                  </button>
+                  <button
+                    type="button"
+                    disabled
+                    title="Watch-only portfolio cannot sign sends"
+                    aria-disabled
+                    className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md border border-border text-xs font-medium opacity-50 cursor-not-allowed"
+                  >
+                    <Send size={13} />
+                    Send
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted-foreground font-mono leading-relaxed">
+                  Portfolio addresses are watch-only. To broadcast transfers, use the Local wallet tab (keys stay in your browser).
+                </p>
                 <button
-                  onClick={() => toast.info("Feature coming soon")}
-                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md border border-border text-xs font-medium hover:bg-accent hover:border-foreground/20 transition-all"
+                  type="button"
+                  onClick={() => setWalletTab("local")}
+                  className="w-full py-2 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
                 >
-                  <ArrowDownRight size={13} />
-                  Receive
-                </button>
-                <button
-                  onClick={() => toast.info("Feature coming soon")}
-                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md border border-border text-xs font-medium hover:bg-accent hover:border-foreground/20 transition-all"
-                >
-                  <Send size={13} />
-                  Send
+                  Open local wallet
                 </button>
               </div>
             </div>
@@ -526,7 +550,7 @@ export default function Wallets() {
                       {w.label && <span className="text-[10px] font-mono text-muted-foreground shrink-0">{w.label}</span>}
                       <span className="text-xs font-mono text-muted-foreground break-all sm:truncate flex-1 basis-full sm:basis-auto">{w.address}</span>
                       <CopyButton text={w.address} />
-                      <button onClick={() => setEditingChain(chain)} className="h-8 w-8 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"><Edit2 size={11} className="mx-auto" /></button>
+                      <button type="button" onClick={() => setEditingWalletId(w.id)} className="h-8 w-8 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"><Edit2 size={11} className="mx-auto" /></button>
                       {!w.isDefault && (
                         <button onClick={() => deleteWallet.mutate({ id: w.id })} className="h-8 w-8 rounded text-muted-foreground hover:text-aegis-red hover:bg-accent transition-all"><Trash2 size={11} className="mx-auto" /></button>
                       )}
@@ -711,37 +735,61 @@ export default function Wallets() {
             All chains · Live balances (RPC / REST as configured)
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[700px] text-xs">
-            <thead>
-              <tr className="border-b border-border">
-                {["Type", "Asset", "Amount", "USD Value", "Address", "Time", "Hash"].map((h) => (
-                  <th key={h} className="text-left pb-3 font-mono text-muted-foreground tracking-wider uppercase text-[10px] pr-4">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {allTx.map((tx, i) => (
-                <tr key={i} className="border-b border-border/50 hover:bg-accent/30 transition-colors">
-                  <td className="py-3 pr-4">
-                    <span className={`flex items-center gap-1.5 ${tx.type === "receive" ? "text-aegis-green" : "text-aegis-red"}`}>
-                      {tx.type === "receive" ? <ArrowDownRight size={11} /> : <ArrowUpRight size={11} />}
-                      <span className="font-mono capitalize">{tx.type}</span>
-                    </span>
-                  </td>
-                  <td className="py-3 pr-4 font-mono font-medium">{tx.chain}</td>
-                  <td className={`py-3 pr-4 font-mono ${tx.type === "receive" ? "text-aegis-green" : "text-aegis-red"}`}>{tx.amount}</td>
-                  <td className="py-3 pr-4 font-mono text-muted-foreground">{tx.usd}</td>
-                  <td className="py-3 pr-4 font-mono text-muted-foreground">{tx.address}</td>
-                  <td className="py-3 pr-4 font-mono text-muted-foreground">{tx.time}</td>
-                  <td className="py-3 font-mono text-muted-foreground">
-                    <span className="flex items-center gap-1">{tx.hash}<ExternalLink size={9} /></span>
-                  </td>
+        {txHistoryLoading ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground py-6">
+            <Loader2 size={12} className="animate-spin" />
+            Loading transaction history…
+          </div>
+        ) : txHistoryError ? (
+          <div className="text-xs text-aegis-red font-mono py-6">Could not load transaction history.</div>
+        ) : txRows.length === 0 ? (
+          <div className="text-center py-10 text-muted-foreground">
+            <History size={24} className="mx-auto mb-2 opacity-30" />
+            <p className="text-xs font-mono">No indexed transactions yet</p>
+            <p className="text-[11px] mt-1 max-w-md mx-auto leading-relaxed">
+              On-chain history for your saved addresses will appear here once indexing is enabled server-side. Until then, use a block explorer for full transaction logs.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[700px] text-xs">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Type", "Asset", "Amount", "USD Value", "Address", "Time", "Hash"].map((h) => (
+                    <th key={h} className="text-left pb-3 font-mono text-muted-foreground tracking-wider uppercase text-[10px] pr-4">{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {txRows.map((tx, i) => (
+                  <tr key={`${tx.hash}-${i}`} className="border-b border-border/50 hover:bg-accent/30 transition-colors">
+                    <td className="py-3 pr-4">
+                      <span className={`flex items-center gap-1.5 ${tx.type === "receive" ? "text-aegis-green" : "text-aegis-red"}`}>
+                        {tx.type === "receive" ? <ArrowDownRight size={11} /> : <ArrowUpRight size={11} />}
+                        <span className="font-mono capitalize">{tx.type}</span>
+                      </span>
+                    </td>
+                    <td className="py-3 pr-4 font-mono font-medium">{tx.chain}</td>
+                    <td className={`py-3 pr-4 font-mono ${tx.type === "receive" ? "text-aegis-green" : "text-aegis-red"}`}>{tx.amount}</td>
+                    <td className="py-3 pr-4 font-mono text-muted-foreground">{tx.usd}</td>
+                    <td className="py-3 pr-4 font-mono text-muted-foreground">{tx.address}</td>
+                    <td className="py-3 pr-4 font-mono text-muted-foreground">{tx.time}</td>
+                    <td className="py-3 font-mono text-muted-foreground">
+                      {tx.explorerUrl ? (
+                        <a href={tx.explorerUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-foreground">
+                          {tx.hash}
+                          <ExternalLink size={9} />
+                        </a>
+                      ) : (
+                        <span className="flex items-center gap-1">{tx.hash}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
         </TabsContent>
@@ -751,12 +799,18 @@ export default function Wallets() {
       </Tabs>
 
       {/* Edit Address Modal */}
-      {editingChain && editingWallet && (
+      {editingWallet && (
         <EditAddressModal
-          chain={editingChain}
+          chain={editingWallet.chain}
           currentAddress={editingWallet.address}
-          onClose={() => setEditingChain(null)}
-          onSave={(address) => updateWallet.mutate({ chain: editingChain as "BTC" | "ETH" | "SOL", address })}
+          onClose={() => setEditingWalletId(null)}
+          onSave={(address) =>
+            updateWallet.mutate({
+              id: editingWallet.id,
+              chain: editingWallet.chain as "BTC" | "ETH" | "SOL",
+              address,
+            })
+          }
         />
       )}
 

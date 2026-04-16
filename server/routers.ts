@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { COOKIE_NAME, DAPP_UNKNOWN_ACCOUNT_MSG, ONE_YEAR_MS } from "@shared/const";
 import { ed25519KeyHex64Schema, ed25519SignatureHex128Schema } from "@shared/dappAuth";
 import { TRPCError } from "@trpc/server";
+import { generateSecret, generateURI } from "otplib";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { toAgentErrorMessage } from "./agents/errorMessage";
@@ -25,12 +26,14 @@ import { storagePut } from "./storage";
 import { fetchBtcBalance, fetchEthBalance, fetchSolBalance } from "./blockchain";
 import { fetchCryptoSpotPrices, fetchCryptoSpotPriceMap } from "./cryptoPrices";
 import { getBtcRestApiBase, getEthRpcUrl, getSolRpcUrl } from "./wallet/chainEndpoints";
+import { pickPrimaryAddressForChain } from "./wallet/pickPrimaryAddress";
 import {
   createAgentRun,
   createMessage,
   createPriceAlert,
   deletePriceAlert,
   deleteWallet,
+  updateWalletById,
   getActivePriceAlerts,
   getAgentHistory,
   getAgentSchedulesByUserId,
@@ -251,9 +254,14 @@ const pricesRouter = router({
 const walletRouter = router({
   /** Non-secret hints for clients / ops (no API keys exposed). */
   getChainInfrastructure: protectedProcedure.query(() => {
+    const ethRpc = Boolean(getEthRpcUrl());
+    const ethKey = Boolean(ENV.etherscanApiKey?.trim());
+    const ethBalanceSource: "rpc" | "etherscan" | "none" = ethRpc ? "rpc" : ethKey ? "etherscan" : "none";
     return {
       btcRestUsesCustomBase: Boolean(ENV.btcRestApiBase?.trim()),
-      ethUsesSelfHostedRpc: Boolean(getEthRpcUrl()),
+      ethUsesSelfHostedRpc: ethRpc,
+      ethBalanceSource,
+      etherscanChainId: ENV.etherscanChainId,
       solUsesSelfHostedRpc: Boolean(ENV.solRpcUrl?.trim()),
       btcRestHostPreview: getBtcRestApiBase().replace(/^https?:\/\//, "").split("/")[0],
       solRpcHostPreview: getSolRpcUrl().replace(/^https?:\/\//, "").split("/")[0],
@@ -266,15 +274,14 @@ const walletRouter = router({
 
   getOnChainBalances: protectedProcedure.query(async ({ ctx }) => {
     const userWallets = await getWalletsByUserId(ctx.user.id);
-    const addresses: Record<string, string> = {};
-    for (const w of userWallets) {
-      addresses[w.chain] = w.address;
-    }
+    const btcAddr = pickPrimaryAddressForChain(userWallets, "BTC");
+    const ethAddr = pickPrimaryAddressForChain(userWallets, "ETH");
+    const solAddr = pickPrimaryAddressForChain(userWallets, "SOL");
 
     const [btc, eth, sol] = await Promise.all([
-      addresses["BTC"] ? fetchBtcBalance(addresses["BTC"]) : Promise.resolve(null),
-      addresses["ETH"] ? fetchEthBalance(addresses["ETH"]) : Promise.resolve(null),
-      addresses["SOL"] ? fetchSolBalance(addresses["SOL"]) : Promise.resolve(null),
+      btcAddr ? fetchBtcBalance(btcAddr) : Promise.resolve(null),
+      ethAddr ? fetchEthBalance(ethAddr) : Promise.resolve(null),
+      solAddr ? fetchSolBalance(solAddr) : Promise.resolve(null),
     ]);
 
     return { BTC: btc, ETH: eth, SOL: sol };
@@ -282,6 +289,7 @@ const walletRouter = router({
 
   updateWallet: protectedProcedure
     .input(z.object({
+      id: z.number().int().positive().optional(),
       chain: z.enum(["BTC", "ETH", "SOL"]),
       address: z.string().min(10).max(128),
       label: z.string().max(64).optional(),
@@ -290,7 +298,30 @@ const walletRouter = router({
       walletPolicy: z.record(z.string(), z.unknown()).optional().nullable(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await upsertWallet({ userId: ctx.user.id, ...input });
+      if (input.id != null) {
+        const rows = await getWalletsByUserId(ctx.user.id);
+        const row = rows.find((w) => w.id === input.id);
+        if (!row || row.chain !== input.chain) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Wallet not found or chain mismatch" });
+        }
+        await updateWalletById(ctx.user.id, input.id, {
+          address: input.address,
+          label: input.label,
+          mpcWalletId: input.mpcWalletId,
+          custodyModel: input.custodyModel,
+          walletPolicy: input.walletPolicy,
+        });
+      } else {
+        await upsertWallet({
+          userId: ctx.user.id,
+          chain: input.chain,
+          address: input.address,
+          label: input.label,
+          mpcWalletId: input.mpcWalletId,
+          custodyModel: input.custodyModel,
+          walletPolicy: input.walletPolicy,
+        });
+      }
       return { success: true };
     }),
 
@@ -314,6 +345,25 @@ const walletRouter = router({
       await deleteWallet(input.id, ctx.user.id);
       return { success: true };
     }),
+
+  /**
+   * On-chain transaction rows for the portfolio (watch addresses).
+   * Returns an empty list until a DB table + indexer (or explorer polling) is wired.
+   */
+  getTransactionHistory: protectedProcedure.query(async (): Promise<
+    Array<{
+      chain: "BTC" | "ETH" | "SOL";
+      type: "receive" | "send";
+      amount: string;
+      usd: string;
+      address: string;
+      time: string;
+      hash: string;
+      explorerUrl?: string;
+    }>
+  > => {
+    return [];
+  }),
 });
 
 // ============================================================
@@ -531,15 +581,14 @@ async function buildPortfolioSummaryForUser(userId: number) {
   const userWallets = await getWalletsByUserId(userId);
   const prices = await fetchCryptoSpotPrices();
 
-  const addresses: Partial<Record<"BTC" | "ETH" | "SOL", string>> = {};
-  for (const w of userWallets) {
-    addresses[w.chain] = w.address;
-  }
+  const btcAddr = pickPrimaryAddressForChain(userWallets, "BTC");
+  const ethAddr = pickPrimaryAddressForChain(userWallets, "ETH");
+  const solAddr = pickPrimaryAddressForChain(userWallets, "SOL");
 
   const [btcBal, ethBal, solBal] = await Promise.all([
-    addresses.BTC ? fetchBtcBalance(addresses.BTC) : Promise.resolve({ balance: 0, address: "" }),
-    addresses.ETH ? fetchEthBalance(addresses.ETH) : Promise.resolve({ balance: 0, address: "" }),
-    addresses.SOL ? fetchSolBalance(addresses.SOL) : Promise.resolve({ balance: 0, address: "" }),
+    btcAddr ? fetchBtcBalance(btcAddr) : Promise.resolve({ balance: 0, address: "" }),
+    ethAddr ? fetchEthBalance(ethAddr) : Promise.resolve({ balance: 0, address: "" }),
+    solAddr ? fetchSolBalance(solAddr) : Promise.resolve({ balance: 0, address: "" }),
   ]);
 
   const pBtc = prices.BTC?.price ?? 0;
@@ -726,18 +775,23 @@ const settingsRouter = router({
     .input(z.object({ enable: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       if (input.enable) {
-        // Generate a mock TOTP secret and backup codes
-        const secret = `AEGIS${Math.random().toString(36).substring(2, 12).toUpperCase()}FUND`;
+        const secret = generateSecret();
         const backupCodes = Array.from({ length: 8 }, () =>
-          Math.random().toString(36).substring(2, 8).toUpperCase()
+          randomBytes(5).toString("hex").toUpperCase()
         );
+        const accountLabel = ctx.user.email?.trim() || ctx.user.name?.trim() || `user-${ctx.user.id}`;
+        const otpauthUrl = generateURI({
+          issuer: "Aegis Fund",
+          label: accountLabel,
+          secret,
+        });
         await upsertMfaSettings(ctx.user.id, {
           isEnabled: true,
           totpSecret: secret,
           backupCodes,
           enabledAt: new Date(),
         });
-        return { success: true, totpSecret: secret, backupCodes, qrCodeUrl: null };
+        return { success: true, totpSecret: secret, backupCodes, qrCodeUrl: otpauthUrl };
       } else {
         await upsertMfaSettings(ctx.user.id, { isEnabled: false, totpSecret: undefined, backupCodes: undefined, enabledAt: null });
         return { success: true, totpSecret: null, backupCodes: [], qrCodeUrl: null };

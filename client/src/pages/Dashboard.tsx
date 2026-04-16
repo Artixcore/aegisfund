@@ -382,7 +382,7 @@ export default function Dashboard() {
               <AlertTriangle size={13} className="text-aegis-gold" />
             </div>
             <p className="text-xs text-muted-foreground font-mono leading-relaxed">
-              Configure price alerts under Alerts to receive threshold notifications when markets move.
+              Configure price alerts on Wallets (Price Alerts) to receive threshold notifications when markets move.
             </p>
           </div>
 
