@@ -1,8 +1,10 @@
 import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
+import { stripGrounding } from "@shared/agentGrounding";
 import {
   InsertUser,
+  type InsertAgentRun,
   agentRuns,
   agentSchedules,
   auditLogs,
@@ -18,6 +20,7 @@ import { kycProfiles, mfaSettings, userSessions, alertHistory, InsertKycProfile 
 import { ENV } from "./_core/env";
 import { assertFieldEncryptionForWrites, decryptUtf8Field, encryptUtf8Field } from "./fieldEncryption";
 import { resolveMysqlPoolOptions } from "../shared/mysqlUrl";
+import { DESK_AGENT_TYPES } from "./agents/deskAgents";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _lastConnectErrorKey: string | null = null;
@@ -257,16 +260,19 @@ export async function createMessage(data: {
 // AGENT HELPERS
 // ============================================================
 
+export type AgentRunAgentType = NonNullable<InsertAgentRun["agentType"]>;
+
 export async function getLatestAgentRuns(userId: number) {
   const db = await getDb();
   if (!db) return [];
-  const agentTypes = [
+  const agentTypes: AgentRunAgentType[] = [
     "market_analysis",
     "crypto_monitoring",
     "forex_monitoring",
     "futures_commodities",
     "historical_research",
-  ] as const;
+    "executive_briefing",
+  ];
 
   const results = [];
   for (const agentType of agentTypes) {
@@ -279,22 +285,66 @@ export async function getLatestAgentRuns(userId: number) {
   return results;
 }
 
-export async function getAgentHistory(userId: number, agentType: string, limit = 10) {
+export async function getAgentHistory(userId: number, agentType: AgentRunAgentType, limit = 10) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(agentRuns)
     .where(and(
       eq(agentRuns.userId, userId),
-      eq(agentRuns.agentType, agentType as "market_analysis" | "crypto_monitoring" | "forex_monitoring" | "futures_commodities" | "historical_research"),
+      eq(agentRuns.agentType, agentType),
       eq(agentRuns.status, "complete"),
     ))
     .orderBy(desc(agentRuns.createdAt))
     .limit(limit);
 }
 
+/** Latest complete JSON per specialist desk (grounding stripped) for the executive briefing synthesizer. */
+export async function getLatestCompleteDeskAgentRunsForBriefing(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const out: Array<{
+    agentType: (typeof DESK_AGENT_TYPES)[number];
+    runId: number | null;
+    completedAt: Date | null;
+    output: Record<string, unknown> | null;
+  }> = [];
+
+  for (const agentType of DESK_AGENT_TYPES) {
+    const rows = await db
+      .select()
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.userId, userId),
+          eq(agentRuns.agentType, agentType),
+          eq(agentRuns.status, "complete"),
+        ),
+      )
+      .orderBy(desc(agentRuns.completedAt))
+      .limit(1);
+    const row = rows[0];
+    if (!row) {
+      out.push({ agentType, runId: null, completedAt: null, output: null });
+      continue;
+    }
+    const raw = row.output;
+    const cleaned =
+      raw && typeof raw === "object" && !Array.isArray(raw)
+        ? stripGrounding(raw as Record<string, unknown>)
+        : null;
+    out.push({
+      agentType,
+      runId: row.id,
+      completedAt: row.completedAt,
+      output: cleaned,
+    });
+  }
+  return out;
+}
+
 export async function createAgentRun(data: {
   userId: number;
-  agentType: "market_analysis" | "crypto_monitoring" | "forex_monitoring" | "futures_commodities" | "historical_research";
+  agentType: AgentRunAgentType;
   taskDescription?: string;
 }) {
   const db = await getDb();
@@ -336,7 +386,7 @@ export async function getAgentSchedulesByUserId(userId: number) {
 
 export async function upsertAgentSchedule(data: {
   userId: number;
-  agentType: "market_analysis" | "crypto_monitoring" | "forex_monitoring" | "futures_commodities" | "historical_research";
+  agentType: AgentRunAgentType;
   intervalHours: number;
   isActive: boolean;
 }) {

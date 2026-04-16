@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { invokeLLM } from "./_core/llm";
+import { invokeLLM, type InvokeParams } from "./_core/llm";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
@@ -11,23 +11,69 @@ vi.mock("./blockchain", () => ({
 }));
 
 vi.mock("./_core/llm", () => ({
-  invokeLLM: vi.fn().mockResolvedValue({
-    choices: [{
-      message: {
-        content: JSON.stringify({
-          summary: "Test market analysis: moderate bullish bias with elevated volatility.",
-          macro_trends: "Equities firm; crypto range-bound; commodities mixed.",
-          volatility_regime: "Elevated vs 30d median.",
-          sentiment_score: 62,
-          risk_factors: ["Fed policy uncertainty", "Geopolitical tensions"],
-          investment_thesis: "Cautiously bullish on risk assets with tight stops.",
-          confidence_level: 72,
-          citations: ["yf-mirror", "user-chain-balances"],
-        }),
-      },
-    }],
-  }),
+  invokeLLM: vi.fn(),
 }));
+
+const marketDeskLlmPayload = {
+  summary: "Test market analysis: moderate bullish bias with elevated volatility.",
+  macro_trends: "Equities firm; crypto range-bound; commodities mixed.",
+  volatility_regime: "Elevated vs 30d median.",
+  sentiment_score: 62,
+  risk_factors: ["Fed policy uncertainty", "Geopolitical tensions"],
+  investment_thesis: "Cautiously bullish on risk assets with tight stops.",
+  confidence_level: 72,
+  citations: ["yf-mirror", "user-chain-balances"],
+};
+
+beforeEach(() => {
+  vi.mocked(invokeLLM).mockImplementation((params: InvokeParams) => {
+    const msg1 = params.messages?.[1];
+    const raw = msg1?.content;
+    const content =
+      typeof raw === "string"
+        ? raw
+        : Array.isArray(raw)
+          ? raw.map((p) => (typeof p === "string" ? p : "text" in p ? p.text : "")).join("\n")
+          : "";
+    if (content.includes("DESK_AGENT_OUTPUTS")) {
+      return Promise.resolve({
+        id: "1",
+        created: 0,
+        model: "mock",
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant" as const,
+            content: JSON.stringify({
+              executive_summary: "Cross-desk synthesis.",
+              cross_asset_view: "Risk tone neutral.",
+              key_risks: ["Liquidity"],
+              priorities_next_7d: ["Watch CPI"],
+              desk_gaps: [],
+              desk_alignment: "Desks broadly aligned on risk tone.",
+              confidence_level: 68,
+              citations: ["yf-mirror"],
+            }),
+          },
+          finish_reason: "stop",
+        }],
+      });
+    }
+    return Promise.resolve({
+      id: "1",
+      created: 0,
+      model: "mock",
+      choices: [{
+        index: 0,
+        message: {
+          role: "assistant" as const,
+          content: JSON.stringify(marketDeskLlmPayload),
+        },
+        finish_reason: "stop",
+      }],
+    });
+  });
+});
 
 vi.mock("./_core/notification", () => ({
   notifyOwner: vi.fn().mockResolvedValue(true),
@@ -84,6 +130,13 @@ vi.mock("./db", async (importOriginal) => {
       { id: 2, userId: 1, agentType: "market_analysis", status: "complete", taskDescription: "Market analysis", output: { summary: "Neutral" }, completedAt: new Date(Date.now() - 86400_000) },
     ]),
     getPortfolioHistory: vi.fn().mockResolvedValue([]),
+    getLatestCompleteDeskAgentRunsForBriefing: vi.fn().mockResolvedValue([
+      { agentType: "market_analysis", runId: 1, completedAt: new Date(), output: { summary: "Desk macro" } },
+      { agentType: "crypto_monitoring", runId: 2, completedAt: new Date(), output: { summary: "Desk crypto" } },
+      { agentType: "forex_monitoring", runId: 3, completedAt: new Date(), output: { summary: "Desk fx" } },
+      { agentType: "futures_commodities", runId: 4, completedAt: new Date(), output: { summary: "Desk fut" } },
+      { agentType: "historical_research", runId: 5, completedAt: new Date(), output: { summary: "Desk hist" } },
+    ]),
     createAgentRun: vi.fn().mockResolvedValue(42),
     updateAgentRun: vi.fn().mockResolvedValue(undefined),
     getConversationsByUserId: vi.fn().mockResolvedValue([]),
@@ -255,6 +308,21 @@ describe("agents.runAgent", () => {
     const userMsg = vi.mocked(invokeLLM).mock.calls[0]?.[0]?.messages?.[1]?.content ?? "";
     expect(userMsg).toContain("portfolioBook");
     expect(userMsg).toContain("user-chain-balances");
+  });
+});
+
+describe("agents.runExecutiveBriefing", () => {
+  it("synthesizes desk outputs into a briefing payload", async () => {
+    vi.mocked(invokeLLM).mockClear();
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.agents.runExecutiveBriefing();
+    expect(result.success).toBe(true);
+    expect(typeof result.output.executive_summary).toBe("string");
+    expect((result.output.executive_summary as string).length).toBeGreaterThan(0);
+
+    const userMsg = vi.mocked(invokeLLM).mock.calls[0]?.[0]?.messages?.[1]?.content ?? "";
+    expect(userMsg).toContain("DESK_AGENT_OUTPUTS");
+    expect(userMsg).toContain("FEATURE_SNAPSHOT");
   });
 });
 

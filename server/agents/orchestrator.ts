@@ -16,7 +16,7 @@ export type AgentRunPrepared = {
   groundingMeta: AgentRunGroundingMeta;
 };
 
-function groundingMetaFromFeatures(features: AgentFeatureSnapshot): AgentRunGroundingMeta {
+export function groundingMetaFromFeatures(features: AgentFeatureSnapshot): AgentRunGroundingMeta {
   const pb = features.portfolioBook;
   return {
     datasetVersion: features.datasetVersion,

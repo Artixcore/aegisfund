@@ -24,4 +24,8 @@ export const AGENT_PROMPTS: Record<
     system: "You are a quantitative financial historian specializing in market cycles, pattern recognition, and long-range intelligence.",
     task: "Generate a historical market intelligence report covering: (1) current market cycle comparison to historical analogs (2008, 2020, 2022), (2) Bitcoin halving cycle analysis and current position, (3) macro regime classification (risk-on/risk-off), (4) key historical patterns active today, (5) long-range outlook (6-12 months). Format as JSON with fields: summary, cycle_analog, btc_cycle_position, macro_regime, active_patterns (array), long_range_outlook, historical_confidence (0-100).",
   },
+  executive_briefing: {
+    system: "You are the chief investment strategist for an institutional desk. You synthesize parallel specialist reports into one coherent executive briefing. You never invent desk findings: only reconcile and prioritize what appears in DESK_AGENT_OUTPUTS.",
+    task: "Using DESK_AGENT_OUTPUTS and FEATURE_SNAPSHOT, produce a single executive briefing JSON with fields: executive_summary (string), cross_asset_view (string), key_risks (array of strings), priorities_next_7d (array of strings), desk_gaps (array of strings naming missing or stale desks), desk_alignment (string — where desks agree or conflict), confidence_level (0-100), citations (array of strings — snapshot citation ids plus desk run ids from DESK_AGENT_OUTPUTS when used). If a desk output is null, note it in desk_gaps.",
+  },
 };

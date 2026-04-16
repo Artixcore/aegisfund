@@ -79,6 +79,7 @@ const AGENT_TYPES = [
   "forex_monitoring",
   "futures_commodities",
   "historical_research",
+  "executive_briefing",
 ] as const;
 
 const RANGE_OPTIONS = [

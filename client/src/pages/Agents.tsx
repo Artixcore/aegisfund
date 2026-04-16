@@ -16,6 +16,7 @@ import {
   History,
   Loader2,
   Play,
+  Sparkles,
   Timer,
   TrendingUp,
   X,
@@ -29,7 +30,18 @@ type AgentType =
   | "crypto_monitoring"
   | "forex_monitoring"
   | "futures_commodities"
-  | "historical_research";
+  | "historical_research"
+  | "executive_briefing";
+
+/** Card and command-strip order (five desks, then synthesizer). */
+const AGENT_CARD_ORDER: AgentType[] = [
+  "market_analysis",
+  "crypto_monitoring",
+  "forex_monitoring",
+  "futures_commodities",
+  "historical_research",
+  "executive_briefing",
+];
 
 const AGENT_META: Record<AgentType, {
   label: string;
@@ -78,6 +90,14 @@ const AGENT_META: Record<AgentType, {
     color: "oklch(0.72 0.12 195)",
     bgColor: "oklch(0.72 0.12 195 / 0.10)",
     mission: "Compiles historical data, identifies market cycle analogs, and produces long-range intelligence.",
+  },
+  executive_briefing: {
+    label: "Executive Briefing",
+    description: "Single-page synthesis of all desk outputs",
+    icon: Sparkles,
+    color: "oklch(0.78 0.14 300)",
+    bgColor: "oklch(0.78 0.14 300 / 0.12)",
+    mission: "Reads the latest complete report from each specialist desk plus live snapshot context, and produces one institutional executive brief. Run desks first for richer input.",
   },
 };
 
@@ -178,13 +198,19 @@ function OutputSection({ output }: { output: Record<string, unknown> | null }) {
   const [expanded, setExpanded] = useState(false);
   if (!output) return null;
   const cleaned = stripGrounding(output);
-  const { summary, ...rest } = cleaned;
-  const summaryStr = summary !== undefined && summary !== null ? String(summary) : null;
+  const { summary, executive_summary, ...rest } = cleaned;
+  const summaryStr =
+    executive_summary !== undefined && executive_summary !== null
+      ? String(executive_summary)
+      : summary !== undefined && summary !== null
+        ? String(summary)
+        : null;
+  const summaryLabel = executive_summary != null ? "Executive summary" : "Analysis summary";
   return (
     <div className="mt-4 space-y-3">
       {summaryStr && (
         <div className="bg-muted/50 rounded-md p-3 border border-border/50">
-          <div className="mono-label mb-1.5">Analysis Summary</div>
+          <div className="mono-label mb-1.5">{summaryLabel}</div>
           <p className="text-xs text-foreground leading-relaxed">{summaryStr}</p>
         </div>
       )}
@@ -560,6 +586,18 @@ export default function Agents() {
     },
   });
 
+  const briefingMutation = trpc.agents.runExecutiveBriefing.useMutation({
+    onSuccess: () => {
+      setRunningAgents((prev) => { const next = new Set(prev); next.delete("executive_briefing"); return next; });
+      utils.agents.getAgentStatuses.invalidate();
+      toast.success("Executive briefing ready");
+    },
+    onError: () => {
+      setRunningAgents((prev) => { const next = new Set(prev); next.delete("executive_briefing"); return next; });
+      toast.error("Executive briefing failed");
+    },
+  });
+
   const upsertSchedule = trpc.agents.upsertSchedule.useMutation({
     onSuccess: () => {
       utils.agents.getSchedules.invalidate();
@@ -570,12 +608,17 @@ export default function Agents() {
 
   const handleRunAgent = (agentType: AgentType) => {
     setRunningAgents((prev) => new Set(prev).add(agentType));
+    if (agentType === "executive_briefing") {
+      briefingMutation.mutate();
+      toast.info("Synthesizing executive briefing from latest desk outputs…");
+      return;
+    }
     runMutation.mutate({ agentType });
     toast.info(`${AGENT_META[agentType].label} agent activated`);
   };
 
   const handleRunAll = () => {
-    const allTypes = Object.keys(AGENT_META) as AgentType[];
+    const allTypes = AGENT_CARD_ORDER.filter((t) => t !== "executive_briefing");
     allTypes.forEach((type) => {
       if (!runningAgents.has(type)) {
         setTimeout(() => handleRunAgent(type), Math.random() * 500);
@@ -604,7 +647,7 @@ export default function Agents() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">AI Agents</h1>
           <p className="text-xs text-muted-foreground font-mono mt-0.5">
-            Parallel intelligence system · 5 specialized agents · Auto-scheduling
+            Five specialist desks + executive briefing synthesizer · Auto-scheduling
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -636,12 +679,17 @@ export default function Agents() {
       </div>
 
       {/* Command overview strip */}
-      <div className="grid grid-cols-5 gap-3">
-        {(Object.keys(AGENT_META) as AgentType[]).map((type) => {
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {AGENT_CARD_ORDER.map((type) => {
           const meta = AGENT_META[type];
           const run = agentRunMap.get(type);
           const sched = scheduleMap.get(type);
-          const status = runningAgents.has(type) ? "running" : (run?.status ?? "idle");
+          const status =
+            runningAgents.has(type)
+            || (type === "executive_briefing" && briefingMutation.isPending)
+            || (type !== "executive_briefing" && runMutation.isPending && runMutation.variables?.agentType === type)
+              ? "running"
+              : (run?.status ?? "idle");
           const Icon = meta.icon;
           return (
             <div
@@ -696,7 +744,7 @@ export default function Agents() {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-5">
-          {(Object.keys(AGENT_META) as AgentType[]).map((type) => {
+          {AGENT_CARD_ORDER.map((type) => {
             const sched = scheduleMap.get(type);
             return (
               <AgentCard
@@ -705,7 +753,11 @@ export default function Agents() {
                 agentRun={agentRunMap.get(type) ?? null}
                 schedule={sched ? { intervalHours: sched.intervalHours, isActive: sched.isActive, nextRunAt: sched.nextRunAt } : null}
                 onRun={() => handleRunAgent(type)}
-                isRunning={runningAgents.has(type)}
+                isRunning={
+                  runningAgents.has(type)
+                  || (type !== "executive_briefing" && runMutation.isPending && runMutation.variables?.agentType === type)
+                  || (type === "executive_briefing" && briefingMutation.isPending)
+                }
                 onSchedule={() => setSchedulingAgent(type)}
                 onHistory={() => setHistoryAgent(type)}
               />
@@ -723,11 +775,16 @@ export default function Agents() {
               </div>
             </div>
             <div className="space-y-3">
-              {(Object.keys(AGENT_META) as AgentType[]).map((type) => {
+              {AGENT_CARD_ORDER.map((type) => {
                 const meta = AGENT_META[type];
                 const run = agentRunMap.get(type);
                 const sched = scheduleMap.get(type);
-                const status = runningAgents.has(type) ? "running" : (run?.status ?? "idle");
+                const status =
+                  runningAgents.has(type)
+                  || (type === "executive_briefing" && briefingMutation.isPending)
+                  || (type !== "executive_briefing" && runMutation.isPending && runMutation.variables?.agentType === type)
+                    ? "running"
+                    : (run?.status ?? "idle");
                 return (
                   <div key={type} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">

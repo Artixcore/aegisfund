@@ -14,7 +14,8 @@ export type AgentFeatureKey =
   | "crypto_monitoring"
   | "forex_monitoring"
   | "futures_commodities"
-  | "historical_research";
+  | "historical_research"
+  | "executive_briefing";
 
 export type FeatureCitation = {
   id: string;
@@ -101,6 +102,8 @@ const AGENT_YAHOO_SPECS: Record<AgentFeatureKey, YahooSpec[]> = {
     { yahoo: "ES=F", key: "ES" },
   ],
   historical_research: [...CRYPTO_TRIO, ...MACRO_RISK],
+  /** Same benchmark bundle as market desk; desk JSON is supplied separately for synthesis. */
+  executive_briefing: [...CRYPTO_TRIO, ...MACRO_RISK],
 };
 
 async function yahooSpot(symbol: string): Promise<{ price: number; changePct24h: number } | null> {
@@ -360,7 +363,7 @@ export async function buildFeatureSnapshot(
   }
 
   if (
-    (agentType === "market_analysis" || agentType === "historical_research") &&
+    (agentType === "market_analysis" || agentType === "historical_research" || agentType === "executive_briefing") &&
     !prices.SPX &&
     !prices.VIX &&
     !prices.BTC

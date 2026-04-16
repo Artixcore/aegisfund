@@ -157,6 +157,35 @@ export function getAgentResponseJsonSchema(agentType: AgentFeatureKey): {
     },
   };
 
+  const briefing = {
+    name: "executive_briefing_report",
+    strict,
+    schema: {
+      type: "object",
+      properties: {
+        executive_summary: { type: "string" },
+        cross_asset_view: { type: "string" },
+        key_risks: { type: "array", items: { type: "string" } },
+        priorities_next_7d: { type: "array", items: { type: "string" } },
+        desk_gaps: { type: "array", items: { type: "string" } },
+        desk_alignment: { type: "string" },
+        confidence_level: { type: "number" },
+        citations: citationsProp,
+      },
+      required: [
+        "executive_summary",
+        "cross_asset_view",
+        "key_risks",
+        "priorities_next_7d",
+        "desk_gaps",
+        "desk_alignment",
+        "confidence_level",
+        "citations",
+      ],
+      additionalProperties: true,
+    },
+  };
+
   const historical = {
     name: "historical_research_report",
     strict,
@@ -192,6 +221,7 @@ export function getAgentResponseJsonSchema(agentType: AgentFeatureKey): {
     forex_monitoring: forex,
     futures_commodities: futures,
     historical_research: historical,
+    executive_briefing: briefing,
   };
 
   return map[agentType];

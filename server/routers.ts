@@ -10,10 +10,11 @@ import { TRPCError } from "@trpc/server";
 import { generateSecret, generateURI } from "otplib";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { prepareExecutiveBriefingRun } from "./agents/briefingOrchestrator";
 import { toAgentErrorMessage } from "./agents/errorMessage";
+import type { AgentFeatureKey } from "./agents/featureStore";
 import { getAgentResponseJsonSchema } from "./agents/outputSchemas";
 import { prepareAgentRun } from "./agents/orchestrator";
-import type { AgentFeatureKey } from "./agents/featureStore";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
@@ -134,10 +135,13 @@ async function runAgentScheduler() {
     for (const schedule of dueSchedules) {
       let runId: number | undefined;
       try {
-        const prepared = await prepareAgentRun(schedule.agentType, {
-          userId: schedule.userId,
-          portfolioBookMode: "light",
-        });
+        const prepared =
+          schedule.agentType === "executive_briefing"
+            ? await prepareExecutiveBriefingRun(schedule.userId, { portfolioBookMode: "light" })
+            : await prepareAgentRun(schedule.agentType, {
+                userId: schedule.userId,
+                portfolioBookMode: "light",
+              });
         const userPreview = prepared.messages[1]?.content?.substring(0, 180) ?? "";
         runId = await createAgentRun({
           userId: schedule.userId,
@@ -478,6 +482,15 @@ function agentJsonResponseFormat(agentType: AgentFeatureKey) {
   };
 }
 
+const agentRunTypeSchema = z.enum([
+  "market_analysis",
+  "crypto_monitoring",
+  "forex_monitoring",
+  "futures_commodities",
+  "historical_research",
+  "executive_briefing",
+]);
+
 const agentsRouter = router({
   getAgentStatuses: protectedProcedure.query(async ({ ctx }) => {
     return getLatestAgentRuns(ctx.user.id);
@@ -485,7 +498,7 @@ const agentsRouter = router({
 
   getAgentHistory: protectedProcedure
     .input(z.object({
-      agentType: z.enum(["market_analysis", "crypto_monitoring", "forex_monitoring", "futures_commodities", "historical_research"]),
+      agentType: agentRunTypeSchema,
       limit: z.number().min(1).max(20).default(10),
     }))
     .query(async ({ ctx, input }) => {
@@ -498,7 +511,7 @@ const agentsRouter = router({
 
   upsertSchedule: protectedProcedure
     .input(z.object({
-      agentType: z.enum(["market_analysis", "crypto_monitoring", "forex_monitoring", "futures_commodities", "historical_research"]),
+      agentType: agentRunTypeSchema,
       intervalHours: z.number().min(1).max(168),
       isActive: z.boolean(),
     }))
@@ -546,6 +559,43 @@ const agentsRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Agent execution failed" });
       }
     }),
+
+  /** Synthesizes the five specialist desks’ latest complete outputs + fresh snapshot into one briefing. */
+  runExecutiveBriefing: protectedProcedure.mutation(async ({ ctx }) => {
+    const prepared = await prepareExecutiveBriefingRun(ctx.user.id);
+    const preview = prepared.messages[1]?.content?.substring(0, 200) ?? "";
+
+    const runId = await createAgentRun({
+      userId: ctx.user.id,
+      agentType: "executive_briefing",
+      taskDescription: preview,
+    });
+
+    try {
+      await updateAgentRun(runId, { status: "analyzing" });
+
+      const response = await invokeLLM({
+        messages: prepared.messages,
+        response_format: agentJsonResponseFormat("executive_briefing"),
+      });
+
+      const rawMsg = response?.choices?.[0]?.message?.content;
+      const rawContent = typeof rawMsg === "string" ? rawMsg : "{}";
+      let output: Record<string, unknown> = {};
+      try { output = JSON.parse(rawContent); } catch { output = { summary: rawContent }; }
+      output = { ...output, [AGENT_RUN_GROUNDING_KEY]: prepared.groundingMeta };
+
+      await updateAgentRun(runId, { status: "complete", output, completedAt: new Date() });
+      return { success: true, runId, output };
+    } catch (error) {
+      await updateAgentRun(runId, {
+        status: "alert",
+        completedAt: new Date(),
+        errorMessage: toAgentErrorMessage(error),
+      });
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Executive briefing failed" });
+    }
+  }),
 });
 
 // ============================================================
