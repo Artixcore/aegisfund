@@ -1,6 +1,9 @@
-/** Browser shim: @solana/web3.js and transitive deps reference Node's `process`. */
+/** Browser shims for Node-only globals used by wallet deps (e.g. `ed25519-hd-key` → `Buffer`). */
+import { Buffer } from "buffer";
 import process from "process";
+
 (globalThis as unknown as { process: typeof process }).process = process;
+(globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
 import { trpc } from "@/lib/trpc";
 import { UNAUTHED_ERR_MSG } from '@shared/const';

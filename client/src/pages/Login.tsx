@@ -157,18 +157,21 @@ export default function Login() {
     setCreateBusy(true);
     try {
       const pair = await generateEd25519KeypairHex();
-      setGenPublic(pair.publicKeyHex);
-      setGenPrivate(pair.privateKeyHex);
       const mnemonic = generateWalletMnemonic12();
-      setGenMnemonic(mnemonic);
       const addrs = await addressesForSettings(mnemonic, {
         accountIndex: 0,
         btcNetwork,
       });
+      setGenPublic(pair.publicKeyHex);
+      setGenPrivate(pair.privateKeyHex);
+      setGenMnemonic(mnemonic);
       setReceiveBtc(addrs.bitcoin);
       setReceiveEth(addrs.ethereum);
       setReceiveSol(addrs.solana);
-    } catch {
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        console.error("[Login] generate keys / derive addresses failed:", err);
+      }
       setCreateError("Could not generate keys. Try again.");
     } finally {
       setCreateBusy(false);
