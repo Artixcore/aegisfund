@@ -1,0 +1,79 @@
+# DigitalOcean App Platform — import with doctl apps create --spec .do/app.yaml
+# or paste into the control panel (Settings → App Spec). Replace GitHub repo if you use a fork.
+# After first deploy, add SECRET env vars in the dashboard (JWT_SECRET, LLM_API_KEY, DATABASE_FIELD_ENCRYPTION_KEY, …).
+# Vite: add VITE_* keys on the `web` component with scope BUILD_TIME or RUN_AND_BUILD_TIME so they are present during `npm run build`.
+#
+# Production MySQL on App Platform requires an existing DO Managed Database cluster: set `production: true` and `cluster_name`
+# on the `databases` entry, then deploy. The template below uses a dev database (`production: false`) so a cluster is created for you.
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+
+features:
+  - buildpack-stack=ubuntu-22
+
+name: aegis-fund
+
+region: nyc
+
+databases:
+  - name: aegis-mysql
+    engine: MYSQL
+    version: "8"
+    production: false
+    db_name: aegis_fund
+    db_user: aegis
+
+jobs:
+  - name: db-migrate
+    kind: PRE_DEPLOY
+    environment_slug: node-js
+    github:
+      repo: Artixcore/aegisfund
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    build_command: npm ci
+    run_command: npm run db:migrate
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    envs:
+      - key: DATABASE_URL
+        value: ${aegis-mysql.DATABASE_URL}
+        scope: RUN_TIME
+        type: general
+
+services:
+  - name: web
+    environment_slug: node-js
+    github:
+      repo: Artixcore/aegisfund
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    build_command: npm ci && npm run build
+    run_command: npm start
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      http_path: /api/version
+      initial_delay_seconds: 30
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 5
+    envs:
+      - key: NODE_ENV
+        value: production
+        scope: RUN_TIME
+        type: general
+      - key: AUTH_DEV_LOGIN
+        value: "false"
+        scope: RUN_TIME
+        type: general
+      - key: DATABASE_URL
+        value: ${aegis-mysql.DATABASE_URL}
+        scope: RUN_TIME
+        type: general
