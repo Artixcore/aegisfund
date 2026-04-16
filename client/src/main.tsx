@@ -1,4 +1,4 @@
-/** Browser shims for Node-only globals used by wallet deps (e.g. `ed25519-hd-key` → `Buffer`). */
+/** Browser shims for Node-only globals (some transitive deps still expect `Buffer` / `process`). */
 import { Buffer } from "buffer";
 import process from "process";
 

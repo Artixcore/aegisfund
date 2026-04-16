@@ -2,10 +2,51 @@ import * as btc from "@scure/btc-signer";
 import { HDKey } from "@scure/bip32";
 import { mnemonicToSeedSync } from "@scure/bip39";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha512 } from "@noble/hashes/sha2.js";
 import { Keypair } from "@solana/web3.js";
-import { derivePath } from "ed25519-hd-key";
 import { mnemonicToAccount } from "viem/accounts";
 import type { BtcNetworkId, WalletSettings } from "./types";
+
+/** SLIP-0010 Ed25519 (same algorithm as `ed25519-hd-key`, without Node `Buffer`). */
+const ED25519_SEED = new TextEncoder().encode("ed25519 seed");
+const SLIP10_ED25519_PATH = /^m(\/[0-9]+')+$/;
+const HARDENED = 0x80000000;
+
+function slip10Ed25519Master(seedBytes: Uint8Array): { key: Uint8Array; chainCode: Uint8Array } {
+  const I = hmac(sha512, ED25519_SEED, seedBytes);
+  return { key: I.subarray(0, 32), chainCode: I.subarray(32, 64) };
+}
+
+function slip10Ed25519Child(
+  parent: { key: Uint8Array; chainCode: Uint8Array },
+  index: number
+): { key: Uint8Array; chainCode: Uint8Array } {
+  const indexBytes = new Uint8Array(4);
+  new DataView(indexBytes.buffer).setUint32(0, index, false);
+  const data = new Uint8Array(1 + parent.key.length + 4);
+  data[0] = 0;
+  data.set(parent.key, 1);
+  data.set(indexBytes, 1 + parent.key.length);
+  const I = hmac(sha512, parent.chainCode, data);
+  return { key: I.subarray(0, 32), chainCode: I.subarray(32, 64) };
+}
+
+/** BIP39 seed bytes → 32-byte Ed25519 seed at hardened-only path (e.g. Ledger SOL). */
+function slip10Ed25519DerivePath(path: string, seedBytes: Uint8Array): Uint8Array {
+  if (!SLIP10_ED25519_PATH.test(path)) {
+    throw new Error("Invalid Ed25519 derivation path");
+  }
+  const segments = path
+    .split("/")
+    .slice(1)
+    .map((p) => parseInt(p.replace("'", ""), 10));
+  let keys = slip10Ed25519Master(seedBytes);
+  for (const seg of segments) {
+    keys = slip10Ed25519Child(keys, seg + HARDENED);
+  }
+  return keys.key;
+}
 
 export function ethDerivationPath(accountIndex: number): `m/44'/60'/0'/0/${number}` {
   return `m/44'/60'/0'/0/${accountIndex}` as `m/44'/60'/0'/0/${number}`;
@@ -47,18 +88,10 @@ export function getEthAddress(mnemonic: string, accountIndex: number): `0x${stri
   return getEthAccount(mnemonic, accountIndex).address;
 }
 
-function seedHexFromMnemonic(mnemonic: string): string {
-  const seed = mnemonicToSeedSync(mnemonic, "");
-  let hex = "";
-  for (let i = 0; i < seed.length; i++) hex += seed[i]!.toString(16).padStart(2, "0");
-  return hex;
-}
-
 /** Ed25519 keypair derived from mnemonic (Ledger-style path). */
 export function getSolKeypair(mnemonic: string, accountIndex: number): Keypair {
-  const { key } = derivePath(solDerivationPath(accountIndex), seedHexFromMnemonic(mnemonic));
-  const seed32 = new Uint8Array(key.length);
-  for (let i = 0; i < key.length; i++) seed32[i] = key[i]!;
+  const seed = mnemonicToSeedSync(mnemonic, "");
+  const seed32 = slip10Ed25519DerivePath(solDerivationPath(accountIndex), seed);
   return Keypair.fromSeed(seed32);
 }
 
