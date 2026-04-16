@@ -68,9 +68,9 @@ function CopyButton({ text }: { text: string }) {
           setTimeout(() => setCopied(false), 2000);
         });
       }}
-      className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+      className="h-8 w-8 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
     >
-      {copied ? <Check size={12} className="text-aegis-green" /> : <Copy size={12} />}
+      {copied ? <Check size={12} className="text-aegis-green mx-auto" /> : <Copy size={12} className="mx-auto" />}
     </button>
   );
 }
@@ -344,7 +344,7 @@ export default function Wallets() {
   );
 
   return (
-    <div className="p-6 space-y-6 animate-fade-up">
+    <div className="p-4 sm:p-6 space-y-6 animate-fade-up">
       <Tabs value={walletTab} onValueChange={(v) => setWalletTab(v as "portfolio" | "local")}>
         <TabsList className="grid w-full max-w-md grid-cols-2">
           <TabsTrigger value="portfolio">Portfolio</TabsTrigger>
@@ -352,32 +352,32 @@ export default function Wallets() {
         </TabsList>
         <TabsContent value="portfolio" className="space-y-6 mt-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Wallets</h1>
           <p className="text-xs text-muted-foreground font-mono mt-0.5">
             Multi-chain portfolio · Live on-chain balances
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between sm:justify-end gap-3">
           {totalValue > 0 && (
-            <div className="text-right">
+            <div className="text-left sm:text-right">
               <div className="mono-label">Live Portfolio Value</div>
               <div className="text-lg font-semibold tabular-nums">{formatUsd(totalValue)}</div>
             </div>
           )}
           <button
             onClick={() => { refetchPrices(); refetchBalances(); }}
-            className="p-2 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
+            className="h-10 w-10 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
             title="Refresh all"
           >
-            <RefreshCw size={13} className={(pricesLoading || balancesLoading) ? "animate-spin" : ""} />
+            <RefreshCw size={13} className={`mx-auto ${(pricesLoading || balancesLoading) ? "animate-spin" : ""}`} />
           </button>
         </div>
       </div>
 
       {/* Wallet Cards */}
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
         {(["BTC", "ETH", "SOL"] as const).map((chain) => {
           const meta = CHAIN_META[chain];
           const price = prices?.[chain]?.price ?? 0;
@@ -393,7 +393,7 @@ export default function Wallets() {
           return (
             <div key={chain} className="aegis-card space-y-4">
               {/* Header */}
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
                   <div
                     className="w-9 h-9 rounded-lg flex items-center justify-center text-base font-bold shrink-0"
@@ -406,11 +406,11 @@ export default function Wallets() {
                     <div className="mono-label">{chain} Network</div>
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="text-left sm:text-right">
                   <div className="text-lg font-semibold tabular-nums">
                     {price > 0 && balance > 0 ? formatUsd(valueUsd) : "—"}
                   </div>
-                  <div className={`flex items-center justify-end gap-1 text-xs font-mono ${up ? "text-aegis-green" : "text-aegis-red"}`}>
+                  <div className={`flex items-center sm:justify-end gap-1 text-xs font-mono ${up ? "text-aegis-green" : "text-aegis-red"}`}>
                     {up ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
                     {formatPct(changePct)}
                   </div>
@@ -418,7 +418,7 @@ export default function Wallets() {
               </div>
 
               {/* Live Balance */}
-              <div className="flex items-center justify-between py-3 border-t border-b border-border">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between py-3 border-t border-b border-border">
                 <div>
                   <div className="mono-label flex items-center gap-1">
                     On-Chain Balance
@@ -429,7 +429,7 @@ export default function Wallets() {
                     {balancesLoading ? "Fetching..." : hasError ? "Unavailable" : `${balance.toFixed(6)} ${chain}`}
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="text-left sm:text-right">
                   <div className="mono-label">Live Price</div>
                   <div className="text-sm font-mono font-medium mt-0.5">
                     {price > 0 ? formatUsd(price) : "—"}
@@ -446,24 +446,24 @@ export default function Wallets() {
               {/* Address */}
               <div>
                 <div className="mono-label mb-1.5">Wallet Address</div>
-                <div className="flex items-center gap-2 bg-muted rounded-md px-3 py-2">
-                  <span className="text-xs font-mono text-muted-foreground truncate flex-1">{address}</span>
+                <div className="flex flex-wrap items-center gap-2 bg-muted rounded-md px-3 py-2">
+                  <span className="text-xs font-mono text-muted-foreground break-all sm:truncate flex-1 basis-full sm:basis-auto">{address}</span>
                   <CopyButton text={address} />
                   <button
                     onClick={() => setEditingChain(chain)}
-                    className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+                    className="h-8 w-8 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
                     title="Edit address"
                   >
-                    <Edit2 size={12} />
+                    <Edit2 size={12} className="mx-auto" />
                   </button>
                   <a
                     href={`${meta.explorerBase}${address}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+                    className="h-8 w-8 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
                     title="View on explorer"
                   >
-                    <ExternalLink size={12} />
+                    <ExternalLink size={12} className="mx-auto" />
                   </a>
                 </div>
                 {hasError && (
@@ -474,7 +474,7 @@ export default function Wallets() {
               </div>
 
               {/* Actions */}
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <button
                   onClick={() => toast.info("Feature coming soon")}
                   className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md border border-border text-xs font-medium hover:bg-accent hover:border-foreground/20 transition-all"
@@ -504,8 +504,8 @@ export default function Wallets() {
             const meta = CHAIN_META[chain];
             return (
               <div key={chain}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2 min-w-0">
                     <div className="w-5 h-5 rounded flex items-center justify-center text-xs font-bold" style={{ background: `${meta.color}18`, color: meta.color }}>
                       {meta.icon}
                     </div>
@@ -514,21 +514,21 @@ export default function Wallets() {
                   </div>
                   <button
                     onClick={() => setAddingWalletChain(chain)}
-                    className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+                    className="h-8 px-2.5 rounded-md border border-border flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
                   >
                     <Plus size={10} /> Add
                   </button>
                 </div>
-                <div className="space-y-1.5 pl-7">
+                <div className="space-y-1.5 pl-0 sm:pl-7">
                   {chainWallets.map((w) => (
-                    <div key={w.id} className="flex items-center gap-2 bg-muted rounded-md px-3 py-2">
+                    <div key={w.id} className="flex flex-wrap items-center gap-2 bg-muted rounded-md px-3 py-2">
                       {w.isDefault && <span className="text-[9px] font-mono text-aegis-green border border-aegis-green/30 rounded px-1">DEFAULT</span>}
                       {w.label && <span className="text-[10px] font-mono text-muted-foreground shrink-0">{w.label}</span>}
-                      <span className="text-xs font-mono text-muted-foreground truncate flex-1">{w.address}</span>
+                      <span className="text-xs font-mono text-muted-foreground break-all sm:truncate flex-1 basis-full sm:basis-auto">{w.address}</span>
                       <CopyButton text={w.address} />
-                      <button onClick={() => setEditingChain(chain)} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"><Edit2 size={11} /></button>
+                      <button onClick={() => setEditingChain(chain)} className="h-8 w-8 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-all"><Edit2 size={11} className="mx-auto" /></button>
                       {!w.isDefault && (
-                        <button onClick={() => deleteWallet.mutate({ id: w.id })} className="p-1 rounded text-muted-foreground hover:text-aegis-red hover:bg-accent transition-all"><Trash2 size={11} /></button>
+                        <button onClick={() => deleteWallet.mutate({ id: w.id })} className="h-8 w-8 rounded text-muted-foreground hover:text-aegis-red hover:bg-accent transition-all"><Trash2 size={11} className="mx-auto" /></button>
                       )}
                     </div>
                   ))}
@@ -544,22 +544,22 @@ export default function Wallets() {
 
       {/* Price Alerts Panel */}
       <div className="aegis-card">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
           <div>
             <div className="text-sm font-semibold">Price Alerts</div>
             <div className="mono-label mt-0.5">Notify when price crosses threshold</div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-md border border-border overflow-hidden">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-md border border-border overflow-hidden w-full sm:w-auto">
               <button
                 onClick={() => setAlertTab("active")}
-                className={`px-3 py-1.5 text-xs font-mono transition-all ${alertTab === "active" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+                className={`flex-1 sm:flex-none px-3 py-2 text-xs font-mono transition-all ${alertTab === "active" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
               >
                 Active
               </button>
               <button
                 onClick={() => setAlertTab("history")}
-                className={`px-3 py-1.5 text-xs font-mono transition-all flex items-center gap-1 ${alertTab === "history" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+                className={`flex-1 sm:flex-none px-3 py-2 text-xs font-mono transition-all flex items-center justify-center gap-1 ${alertTab === "history" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
               >
                 <History size={10} /> History
               </button>
@@ -567,7 +567,7 @@ export default function Wallets() {
             {alertTab === "active" && (
               <button
                 onClick={() => setShowCreateAlert(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-foreground text-background text-xs font-medium hover:opacity-90 transition-all"
+                className="h-10 px-3 rounded-md bg-foreground text-background text-xs font-medium hover:opacity-90 transition-all"
               >
                 <Plus size={11} />
                 New Alert
@@ -597,7 +597,7 @@ export default function Wallets() {
                 return (
                   <div
                     key={alert.id}
-                    className={`flex items-center justify-between p-3 rounded-lg border transition-all ${alert.isActive ? "border-border bg-muted/30" : "border-border/40 bg-muted/10 opacity-60"}`}
+                    className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg border transition-all ${alert.isActive ? "border-border bg-muted/30" : "border-border/40 bg-muted/10 opacity-60"}`}
                   >
                     <div className="flex items-center gap-3">
                       <div
@@ -621,7 +621,7 @@ export default function Wallets() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 self-end sm:self-auto">
                       {alert.triggeredAt && (
                         <span className="text-[10px] font-mono text-muted-foreground">Triggered</span>
                       )}
@@ -663,7 +663,7 @@ export default function Wallets() {
                 const threshold = parseFloat(String(h.threshold));
                 const priceAtTrigger = parseFloat(String(h.priceAtTrigger));
                 return (
-                  <div key={h.id} className="flex items-center justify-between p-3 rounded-lg border border-border/60 bg-muted/20">
+                  <div key={h.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg border border-border/60 bg-muted/20">
                     <div className="flex items-center gap-3">
                       <div
                         className="w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold"
@@ -688,7 +688,7 @@ export default function Wallets() {
                     <button
                       onClick={() => rearmAlert.mutate({ symbol: h.symbol, condition: h.condition, threshold })}
                       disabled={rearmAlert.isPending}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all disabled:opacity-50"
+                      className="h-9 px-2.5 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all disabled:opacity-50 self-end sm:self-auto"
                       title="Re-arm this alert"
                     >
                       <RefreshCcw size={10} />
@@ -704,7 +704,7 @@ export default function Wallets() {
 
       {/* Transaction History */}
       <div className="aegis-card">
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-5">
           <div className="mono-label">Transaction History</div>
           <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
             <Wallet size={11} />
@@ -712,7 +712,7 @@ export default function Wallets() {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full min-w-[700px] text-xs">
             <thead>
               <tr className="border-b border-border">
                 {["Type", "Asset", "Amount", "USD Value", "Address", "Time", "Hash"].map((h) => (

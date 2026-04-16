@@ -145,9 +145,9 @@ export default function Dashboard() {
   }));
 
   return (
-    <div className="p-6 space-y-6 animate-fade-up">
+    <div className="p-4 sm:p-6 space-y-6 animate-fade-up">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Command Center</h1>
           <p className="text-xs text-muted-foreground font-mono mt-0.5">
@@ -156,7 +156,7 @@ export default function Dashboard() {
         </div>
         <button
           onClick={() => refetchPrices()}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
+          className="h-10 px-3 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all self-start sm:self-auto"
         >
           <RefreshCw size={11} />
           Refresh
@@ -164,14 +164,14 @@ export default function Dashboard() {
       </div>
 
       {/* Portfolio summary row */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Total portfolio value */}
-        <div className="col-span-2 aegis-card">
+        <div className="lg:col-span-2 aegis-card">
           <div className="mono-label mb-2">Total Portfolio Value</div>
           {portfolioLoading ? (
             <div className="shimmer rounded h-8 w-48 mb-2" />
           ) : (
-            <div className="text-3xl font-semibold tabular-nums">
+            <div className="text-2xl sm:text-3xl font-semibold tabular-nums">
               {formatUsd(portfolio?.totalValueUsd ?? 0)}
             </div>
           )}
@@ -189,7 +189,7 @@ export default function Dashboard() {
               </>
             )}
           </div>
-          <div className="flex items-center gap-4 mt-4 pt-4 border-t border-border">
+          <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t border-border">
             <div>
               <div className="mono-label">BTC</div>
               <div className="text-sm font-mono font-medium mt-0.5">{(portfolio?.btcBalance ?? 0).toFixed(4)}</div>
@@ -208,7 +208,7 @@ export default function Dashboard() {
         {/* Asset allocation */}
         <div className="aegis-card">
           <div className="mono-label mb-3">Asset Allocation</div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <ResponsiveContainer width={80} height={80}>
               <PieChart>
                 <Pie
@@ -273,7 +273,7 @@ export default function Dashboard() {
 
       {/* P&L History Chart */}
       <div className="aegis-card">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <BarChart3 size={13} className="text-muted-foreground" />
@@ -291,12 +291,12 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             {RANGE_OPTIONS.map((opt) => (
               <button
                 key={opt.label}
                 onClick={() => setHistoryDays(opt.days)}
-                className={`px-2.5 py-1 rounded text-xs font-mono transition-all ${
+                className={`h-8 px-2.5 rounded text-xs font-mono transition-all ${
                   historyDays === opt.days
                     ? "bg-foreground text-background"
                     : "text-muted-foreground hover:text-foreground"
@@ -354,7 +354,7 @@ export default function Dashboard() {
       {/* Live price tickers */}
       <div>
         <div className="mono-label mb-3">Live Market Prices</div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           <PriceCard symbol="BTC" name="Bitcoin" price={btc?.price ?? 0} changePct={btc?.changePct24h ?? 0} sparkline={btc?.sparkline ?? []} />
           <PriceCard symbol="ETH" name="Ethereum" price={eth?.price ?? 0} changePct={eth?.changePct24h ?? 0} sparkline={eth?.sparkline ?? []} />
           <PriceCard symbol="SOL" name="Solana" price={sol?.price ?? 0} changePct={sol?.changePct24h ?? 0} sparkline={sol?.sparkline ?? []} />
@@ -362,7 +362,7 @@ export default function Dashboard() {
       </div>
 
       {/* Bottom row: Activity + Alerts */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* On-chain activity (no server-side tx feed yet) */}
         <div className="aegis-card">
           <div className="flex items-center justify-between mb-4">

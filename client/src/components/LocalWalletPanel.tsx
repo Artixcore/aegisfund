@@ -369,7 +369,7 @@ export default function LocalWalletPanel() {
       {!hasVault ? (
         <div className="aegis-card p-4 space-y-4">
           <p className="text-xs text-muted-foreground">Create a new 12-word wallet or restore from backup.</p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => void onCreateStart()}>
               Create wallet
             </Button>
@@ -423,8 +423,8 @@ export default function LocalWalletPanel() {
                   Lock session
                 </Button>
               ) : (
-                <div className="flex gap-2 flex-wrap items-end">
-                  <Input type="password" className="h-8 text-xs w-48" placeholder="Passphrase" value={unlockPass} onChange={(e) => setUnlockPass(e.target.value)} />
+                <div className="flex gap-2 flex-wrap items-end w-full sm:w-auto">
+                  <Input type="password" className="h-8 text-xs w-full sm:w-48" placeholder="Passphrase" value={unlockPass} onChange={(e) => setUnlockPass(e.target.value)} />
                   <Button size="sm" className="h-8" disabled={busy} onClick={() => void onUnlock()}>
                     Unlock
                   </Button>
@@ -450,7 +450,7 @@ export default function LocalWalletPanel() {
               <Label className="text-xs font-mono">SOL JSON-RPC (CORS must allow this origin)</Label>
               <Input className="font-mono text-xs" value={settings.solRpcUrl} onChange={(e) => setSettings({ ...settings, solRpcUrl: e.target.value })} placeholder="https://…" />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs font-mono">ETH network</Label>
                 <select
@@ -473,7 +473,7 @@ export default function LocalWalletPanel() {
                   <option value="testnet">testnet</option>
                 </select>
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <Label className="text-xs font-mono">SOL cluster</Label>
                 <select
                   className="w-full h-8 text-xs bg-muted border border-border rounded-md px-2"
@@ -509,7 +509,7 @@ export default function LocalWalletPanel() {
                 </Button>
               </div>
               {balances.err && <p className="text-xs text-destructive font-mono">{balances.err}</p>}
-              <div className="grid md:grid-cols-3 gap-4 text-xs font-mono">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs font-mono">
                 <div>
                   <div className="text-muted-foreground mb-1">Ethereum</div>
                   <div className="break-all">{addrs.ethereum ?? "—"}</div>
@@ -563,7 +563,7 @@ export default function LocalWalletPanel() {
 
               <div className="border-t border-border pt-4 space-y-2">
                 <h3 className="text-sm font-semibold">Send</h3>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant={sendChain === "ethereum" ? "default" : "outline"} className="h-8 text-xs" onClick={() => setSendChain("ethereum")}>
                     ETH
                   </Button>
@@ -581,11 +581,11 @@ export default function LocalWalletPanel() {
                   value={sendAmt}
                   onChange={(e) => setSendAmt(e.target.value)}
                 />
-                <div className="flex gap-2 flex-wrap">
-                  <Button size="sm" variant="secondary" className="h-8 text-xs" disabled={busy} onClick={() => void estimateFee()}>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button size="sm" variant="secondary" className="h-8 text-xs w-full sm:w-auto" disabled={busy} onClick={() => void estimateFee()}>
                     Estimate fee
                   </Button>
-                  <Button size="sm" className="h-8 text-xs" disabled={busy} onClick={() => void onSend()}>
+                  <Button size="sm" className="h-8 text-xs w-full sm:w-auto" disabled={busy} onClick={() => void onSend()}>
                     Sign & broadcast
                   </Button>
                 </div>
