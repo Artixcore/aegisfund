@@ -56,6 +56,14 @@ export const ENV = {
   /** JSON map of agent type → provider id (e.g. `{"crypto_monitoring":"grok"}`). */
   llmAgentRoutingRaw: process.env.LLM_AGENT_ROUTING?.trim() ?? "",
 
+  /**
+   * When true, chat payloads use `max_completion_tokens` instead of `max_tokens` (required by some OpenAI models).
+   * Heuristics also apply when unset; set to true if your model rejects `max_tokens`.
+   */
+  llmPreferMaxCompletionTokens:
+    process.env.LLM_PREFER_MAX_COMPLETION_TOKENS === "true" ||
+    process.env.LLM_PREFER_MAX_COMPLETION_TOKENS === "1",
+
   /** OpenAI platform (https://api.openai.com). */
   openaiApiKey: process.env.OPENAI_API_KEY?.trim() ?? "",
   openaiLlmModel: process.env.OPENAI_LLM_MODEL?.trim() || "gpt-4o-mini",

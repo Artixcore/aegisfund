@@ -1,3 +1,4 @@
+import { ENV } from "../_core/env";
 import type {
   FileContent,
   ImageContent,
@@ -199,9 +200,31 @@ export function stripLlmRouting(
   };
 }
 
+/**
+ * Some OpenAI models reject `max_tokens` and require `max_completion_tokens` in Chat Completions.
+ */
+export function shouldUseMaxCompletionTokens(
+  modelId: string,
+  envPrefer: boolean,
+): boolean {
+  if (envPrefer) return true;
+  const id = modelId.trim().toLowerCase();
+  if (id === "chatgpt-4o-latest") return true;
+  if (/^gpt-5/.test(id)) return true;
+  if (/^gpt-4\.1/.test(id)) return true;
+  if (/^o[1-9]/.test(id)) return true;
+  if (/\b(o1|o3|o4)-(mini|preview|pro|nano)\b/.test(id)) return true;
+  return false;
+}
+
+export type BuildOpenAiCompatiblePayloadOptions = {
+  useMaxCompletionTokens?: boolean;
+};
+
 export function buildOpenAiCompatiblePayload(
   modelId: string,
   params: ChatCompletionsRequest,
+  options?: BuildOpenAiCompatiblePayloadOptions,
 ): Record<string, unknown> {
   const {
     messages,
@@ -234,7 +257,12 @@ export function buildOpenAiCompatiblePayload(
   }
 
   const cap = maxTokens ?? max_tokens;
-  payload.max_tokens = typeof cap === "number" && cap > 0 ? cap : 32768;
+  const tokenCap = typeof cap === "number" && cap > 0 ? cap : 32768;
+  if (options?.useMaxCompletionTokens) {
+    payload.max_completion_tokens = tokenCap;
+  } else {
+    payload.max_tokens = tokenCap;
+  }
 
   if (/gemini/i.test(modelId)) {
     payload.thinking = { budget_tokens: 128 };
@@ -261,7 +289,13 @@ export async function postOpenAiCompatibleChatCompletions(
   params: InvokeParams,
 ): Promise<InvokeResult> {
   const bodyParams = stripLlmRouting(params);
-  const payload = buildOpenAiCompatiblePayload(modelId, bodyParams);
+  const useMaxCompletionTokens = shouldUseMaxCompletionTokens(
+    modelId,
+    ENV.llmPreferMaxCompletionTokens,
+  );
+  const payload = buildOpenAiCompatiblePayload(modelId, bodyParams, {
+    useMaxCompletionTokens: useMaxCompletionTokens,
+  });
 
   const response = await fetch(completionsUrl, {
     method: "POST",

@@ -13,7 +13,9 @@ export {
   normalizeResponseFormatForPayload,
   normalizeToolChoiceForPayload,
   postOpenAiCompatibleChatCompletions,
+  shouldUseMaxCompletionTokens,
   stripLlmRouting,
+  type BuildOpenAiCompatiblePayloadOptions,
 } from "./openaiCompatibleChat";
 export {
   DEFAULT_OPENAI_CHAT_COMPLETIONS_URL,
