@@ -19,6 +19,7 @@
     "db:up:docker": "docker compose up -d mysql",
     "db:ensure": "node scripts/ensure-db.mjs",
     "db:migrate": "node ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:ensure:kyc-columns": "node scripts/ensure-kyc-selfie-columns.mjs",
     "db:push": "node ./node_modules/drizzle-kit/bin.cjs generate && node ./node_modules/drizzle-kit/bin.cjs migrate"
   },
   "dependencies": {

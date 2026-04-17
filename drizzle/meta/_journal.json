@@ -64,6 +64,13 @@
       "when": 1776446357256,
       "tag": "0008_open_fixer",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1776450000000,
+      "tag": "0009_kyc_selfie_columns",
+      "breakpoints": true
     }
   ]
 }
