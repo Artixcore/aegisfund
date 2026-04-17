@@ -24,7 +24,7 @@ export class LegacyOpenAiCompatProvider extends OpenAiCompatLlmProvider {
   chatCompletion(params: InvokeParams): Promise<InvokeResult> {
     const modelId =
       params.llm?.model?.trim() ||
-      (ENV.llmModel?.trim() || "gemini-2.5-flash");
+      (ENV.llmModel?.trim() || "gpt-4o-mini");
     return postOpenAiCompatibleChatCompletions(
       legacyCompletionsUrl(),
       ENV.llmApiKey,

@@ -38,8 +38,11 @@ export const ENV = {
 
   /** OpenAI-compatible chat completions base (no path). Default: OpenAI public API. */
   llmBaseUrl: process.env.LLM_BASE_URL ?? "",
-  /** Chat model id for the completions endpoint (must match your LLM_BASE_URL provider). */
-  llmModel: process.env.LLM_MODEL?.trim() || "gemini-2.5-flash",
+  /**
+   * Legacy `LLM_*` model id. Default `gpt-4o-mini` matches the default host (OpenAI) when `LLM_BASE_URL` is unset.
+   * Use a Gemini model id only when `LLM_BASE_URL` points at a Gemini-compatible or proxy endpoint.
+   */
+  llmModel: process.env.LLM_MODEL?.trim() || "gpt-4o-mini",
   llmApiKey:
     process.env.LLM_API_KEY ??
     process.env.OPENAI_API_KEY ??
