@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { KYC_COUNTRY_NAMES } from "@/data/kycCountries";
 
 const TIERS = [
   { id: "basic", label: "Basic", limit: "$10,000 / day", features: ["Identity verification", "Standard trading limits", "Basic wallet access"] },
@@ -28,12 +29,6 @@ const STEPS = [
   { id: "document", label: "Document", icon: FileText },
   { id: "selfie", label: "Selfie", icon: Upload },
   { id: "review", label: "Review", icon: CheckCircle2 },
-];
-
-const COUNTRIES = [
-  "United States", "United Kingdom", "Germany", "France", "Singapore",
-  "Japan", "Canada", "Australia", "Switzerland", "Netherlands",
-  "Sweden", "Norway", "Denmark", "Finland", "Austria",
 ];
 
 const DOC_TYPES = ["Passport", "National ID Card", "Driver's License", "Residence Permit"];
@@ -293,7 +288,7 @@ export default function KYC() {
                 className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:border-foreground/40 transition-colors"
               >
                 <option value="">Select country</option>
-                {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {KYC_COUNTRY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div className="col-span-2">
@@ -304,7 +299,7 @@ export default function KYC() {
                 className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:border-foreground/40 transition-colors"
               >
                 <option value="">Select country</option>
-                {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {KYC_COUNTRY_NAMES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           </div>
