@@ -25,7 +25,7 @@ export async function prepareExecutiveBriefingRun(
     "DESK_AGENT_OUTPUTS (newest complete run per desk; internal grounding keys stripped):",
     JSON.stringify(deskRows, null, 2),
     "",
-    "Use FEATURE_SNAPSHOT for current market marks, `unifiedMarketBook` (Finnhub bundle when enabled), and portfolioBook (same authority rules as other agents).",
+    "Use FEATURE_SNAPSHOT for current market marks, `tradeWatchBook` (TradeWatch bundle when enabled), and portfolioBook (same authority rules as other agents).",
     "Include top-level JSON field `citations` listing snapshot citation ids and, when you relied on a desk row, strings like `desk:market_analysis:runId`.",
     "FEATURE_SNAPSHOT:",
     JSON.stringify(features, null, 2),

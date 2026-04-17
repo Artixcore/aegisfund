@@ -3,6 +3,12 @@ import { ENV } from "../_core/env";
 import { getKycProfile, upsertKycProfile } from "../db";
 import { getLlmManager } from "../llm/manager";
 import type { InvokeParams, InvokeResult, Message } from "../llm/types";
+import {
+  deleteLocalKycTreeForUser,
+  mimeFromFileName,
+  parseLocalKycFilePathname,
+  readLocalKycBytesByUrl,
+} from "./localKycStorage";
 import { checkSelfiePoseDiversity } from "./selfieSimilarity";
 
 export type AutomatedKycOutcome = {
@@ -44,7 +50,23 @@ function textFromInvokeResult(result: InvokeResult): string {
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 async function fetchAsDataUrl(url: string): Promise<{ dataUrl: string; mime: string } | null> {
-  const res = await fetch(url, { redirect: "follow" });
+  const trimmed = url.trim();
+  const fromDisk = await readLocalKycBytesByUrl(trimmed);
+  if (fromDisk) {
+    if (fromDisk.length > MAX_IMAGE_BYTES) return null;
+    let mime = "image/jpeg";
+    try {
+      const u = new URL(trimmed);
+      const p = parseLocalKycFilePathname(u.pathname);
+      mime = p ? mimeFromFileName(p.fileName) : "image/jpeg";
+    } catch {
+      return null;
+    }
+    if (!mime.startsWith("image/")) return null;
+    const b64 = fromDisk.toString("base64");
+    return { dataUrl: `data:${mime};base64,${b64}`, mime };
+  }
+  const res = await fetch(trimmed, { redirect: "follow" });
   if (!res.ok) return null;
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length > MAX_IMAGE_BYTES) return null;
@@ -52,6 +74,19 @@ async function fetchAsDataUrl(url: string): Promise<{ dataUrl: string; mime: str
   if (!mime.startsWith("image/")) return null;
   const b64 = buf.toString("base64");
   return { dataUrl: `data:${mime};base64,${b64}`, mime };
+}
+
+async function clearLocalKycUploadsAfterVerification(userId: number): Promise<void> {
+  if (!ENV.kycLocalStorageDir?.trim()) return;
+  await deleteLocalKycTreeForUser(userId);
+  await upsertKycProfile(userId, {
+    documentFrontUrl: null,
+    documentBackUrl: null,
+    selfieUrl: null,
+    selfieUrl1: null,
+    selfieUrl2: null,
+    selfieUrl3: null,
+  });
 }
 
 function isProbablyPdfUrl(url: string): boolean {
@@ -310,6 +345,7 @@ export async function runAutomatedKycVerification(userId: number): Promise<Autom
       rejectionReason: poseDupReason,
       reviewedAt,
     });
+    await clearLocalKycUploadsAfterVerification(userId);
     return o;
   }
 
@@ -335,6 +371,8 @@ export async function runAutomatedKycVerification(userId: number): Promise<Autom
       reviewedAt,
     });
   }
+
+  await clearLocalKycUploadsAfterVerification(userId);
 
   return outcome;
 }

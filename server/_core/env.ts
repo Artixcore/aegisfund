@@ -31,10 +31,28 @@ export const ENV = {
   dataServiceApiKey:
     process.env.AEGIS_DATA_API_KEY ?? process.env.BUILT_IN_FORGE_API_KEY ?? "",
 
-  /** Finnhub REST API (https://finnhub.io/docs/api). Required for `market.*` tRPC procedures. */
-  finnhubApiKey: process.env.FINNHUB_API_KEY?.trim() ?? "",
-  /** Default `https://finnhub.io/api/v1`. */
-  finnhubBaseUrl: process.env.FINNHUB_BASE_URL?.trim() || "https://finnhub.io/api/v1",
+  /**
+   * Direct S3 uploads (KYC images, etc.) when set with `s3PublicBaseUrl`.
+   * If configured, storage uses S3 instead of the data gateway.
+   */
+  s3Bucket: process.env.S3_BUCKET?.trim() ?? process.env.AWS_S3_BUCKET?.trim() ?? "",
+  /** HTTPS base for public object URLs (no trailing slash), e.g. website endpoint or CloudFront. */
+  s3PublicBaseUrl: process.env.S3_PUBLIC_BASE_URL?.trim().replace(/\/+$/, "") ?? "",
+  awsRegion: process.env.AWS_REGION?.trim() ?? process.env.AWS_DEFAULT_REGION?.trim() ?? "us-east-1",
+  /** Optional MinIO/custom endpoint (leave empty for AWS). */
+  s3Endpoint: process.env.S3_ENDPOINT?.trim() ?? "",
+
+  /**
+   * KYC uploads on local disk (under `kyc/<userId>/...`). When set, `kyc/*` keys use FS + `/api/kyc/file/...` URLs.
+   */
+  kycLocalStorageDir: process.env.KYC_LOCAL_STORAGE_DIR?.trim() ?? "",
+  /** Public origin for local KYC file URLs (no trailing slash), e.g. http://localhost:3000 */
+  publicAppUrl: process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "") ?? "",
+
+  /** TradeWatch REST API (https://tradewatch.io/docs). Required for `market.*` tRPC procedures. */
+  tradewatchApiKey: process.env.TRADEWATCH_API_KEY?.trim() ?? "",
+  /** Override API host for staging; default production `https://api.tradewatch.io`. */
+  tradewatchBaseUrl: process.env.TRADEWATCH_BASE_URL?.trim() || "https://api.tradewatch.io",
 
   /** OpenAI-compatible chat completions base (no path). Default: OpenAI public API. */
   llmBaseUrl: process.env.LLM_BASE_URL ?? "",

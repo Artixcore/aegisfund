@@ -15,7 +15,7 @@ export type MarketQuote = {
   bid: number;
   ask: number;
   mid: number;
-  source: "finnhub";
+  source: "tradewatch";
 };
 
 export type MarketQuotesResult = {

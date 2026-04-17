@@ -1,21 +1,21 @@
 import { ENV } from "../_core/env";
-import { createFinnhubClient } from "../finnhub/client";
+import { createTradeWatchClient } from "../tradewatch/client";
 import type { MarketDataProvider } from "./marketDataProvider";
-import { FinnhubMarketProvider } from "./finnhubMarketProvider";
+import { TradeWatchMarketProvider } from "./tradewatchMarketProvider";
 
 let cachedProvider: MarketDataProvider | null = null;
 
 /**
- * Returns the configured market data provider (Finnhub).
- * Call only when `ENV.finnhubApiKey` is non-empty.
+ * Returns the configured market data provider (TradeWatch).
+ * Call only when `ENV.tradewatchApiKey` is non-empty.
  */
 export function getMarketDataProvider(): MarketDataProvider {
   if (!cachedProvider) {
-    const client = createFinnhubClient({
-      baseUrl: ENV.finnhubBaseUrl,
-      apiKey: ENV.finnhubApiKey,
+    const client = createTradeWatchClient({
+      baseUrl: ENV.tradewatchBaseUrl,
+      apiKey: ENV.tradewatchApiKey,
     });
-    cachedProvider = new FinnhubMarketProvider(client);
+    cachedProvider = new TradeWatchMarketProvider(client);
   }
   return cachedProvider;
 }

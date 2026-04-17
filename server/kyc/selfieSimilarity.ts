@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { loadKycImageBytes } from "./localKycStorage";
 
 /**
  * 8×8 average hash (64 bits) for coarse duplicate detection between selfie poses.
@@ -26,10 +27,8 @@ export async function averageHashFromImageBuffer(buf: Buffer): Promise<bigint | 
 
 export async function averageHashFromUrl(url: string): Promise<bigint | null> {
   try {
-    const res = await fetch(url, { redirect: "follow" });
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > 6 * 1024 * 1024) return null;
+    const buf = await loadKycImageBytes(url);
+    if (!buf || buf.length > 6 * 1024 * 1024) return null;
     return averageHashFromImageBuffer(buf);
   } catch {
     return null;

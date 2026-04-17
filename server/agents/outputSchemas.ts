@@ -3,7 +3,7 @@ import type { AgentFeatureKey } from "./featureStore";
 const structuredMarketReportSchema = {
   type: "object",
   description:
-    "Optional Finnhub-aligned digest from FEATURE_SNAPSHOT.unifiedMarketBook; omit or keep minimal if disabled or errors.",
+    "Optional TradeWatch-aligned digest from FEATURE_SNAPSHOT.tradeWatchBook; omit or keep minimal if disabled or errors.",
   properties: {
     generatedAt: { type: "string" },
     assets: {

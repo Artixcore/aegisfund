@@ -20,7 +20,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
 import { systemRouter } from "./_core/systemRouter";
-import { marketRouter } from "./market/marketRouter";
+import { tradewatchRouter } from "./market/tradewatchRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { callDataApi } from "./_core/dataApi";
 import {
@@ -1233,7 +1233,7 @@ export const appRouter = router({
     }),
   }),
   prices: pricesRouter,
-  market: marketRouter,
+  market: tradewatchRouter,
   wallet: walletRouter,
   messages: messagesRouter,
   agents: agentsRouter,

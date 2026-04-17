@@ -8,83 +8,93 @@ import type {
   MarketSymbolsPage,
 } from "./types";
 
-/** Finnhub /quote response (subset). */
-export type FinnhubQuoteResponse = {
-  c?: number;
-  h?: number;
-  l?: number;
-  o?: number;
-  pc?: number;
-  t?: number;
+type TwLastQuote = {
+  symbol: string;
+  ask: number;
+  bid: number;
+  mid: number;
+  timestamp: number;
 };
 
-/** Finnhub candle response when s === "ok". */
-export type FinnhubCandleResponse = {
-  s: string;
-  t?: number[];
-  o?: number[];
-  h?: number[];
-  l?: number[];
-  c?: number[];
+type TwLastQuotesBody = {
+  items: TwLastQuote[];
 };
 
-export function normalizeFinnhubQuote(
-  category: MarketCategory,
-  logicalSymbol: string,
-  q: FinnhubQuoteResponse,
-): MarketQuote {
-  const mid = q.c ?? 0;
-  const ts = q.t != null && q.t > 0 ? q.t : Math.floor(Date.now() / 1000);
+type TwOhlcCandle = {
+  time: number;
+  open_ask: number;
+  high_ask: number;
+  low_ask: number;
+  close_ask: number;
+  open_bid: number;
+  high_bid: number;
+  low_bid: number;
+  close_bid: number;
+};
+
+type TwOhlcBody = {
+  symbol: string;
+  resolution: string;
+  items: TwOhlcCandle[];
+};
+
+type TwSymbolRow = {
+  symbol: string;
+  name: string;
+};
+
+type TwSymbolsPageBody = {
+  items: TwSymbolRow[];
+  total?: number | null;
+  next_page?: string | null;
+  previous_page?: string | null;
+};
+
+function mid(a: number, b: number): number {
+  return (a + b) / 2;
+}
+
+export function normalizeQuote(category: MarketCategory, row: TwLastQuote): MarketQuote {
   return {
     category,
-    symbol: logicalSymbol,
-    timestamp: ts,
-    bid: mid,
-    ask: mid,
-    mid,
-    source: "finnhub",
+    symbol: row.symbol,
+    timestamp: row.timestamp,
+    bid: row.bid,
+    ask: row.ask,
+    mid: row.mid,
+    source: "tradewatch",
   };
 }
 
-export function normalizeQuotesFromItems(category: MarketCategory, items: MarketQuote[]): MarketQuotesResult {
+export function normalizeQuotes(category: MarketCategory, body: TwLastQuotesBody): MarketQuotesResult {
+  const items = (body.items ?? []).map((row) => normalizeQuote(category, row));
   return { items };
 }
 
-export function normalizeFinnhubCandles(
+export function normalizeOhlc(
   category: MarketCategory,
-  logicalSymbol: string,
-  resolutionInput: string,
-  fhRes: FinnhubCandleResponse,
-  _finnhubResolution: string,
+  symbol: string,
+  body: TwOhlcBody,
 ): MarketCandlesResult {
-  const candles: MarketCandle[] = [];
-  if (fhRes.s === "ok" && fhRes.t && fhRes.o && fhRes.h && fhRes.l && fhRes.c) {
-    const n = fhRes.t.length;
-    for (let i = 0; i < n; i++) {
-      candles.push({
-        time: fhRes.t[i]!,
-        open: fhRes.o[i]!,
-        high: fhRes.h[i]!,
-        low: fhRes.l[i]!,
-        close: fhRes.c[i]!,
-      });
-    }
-  }
+  const candles: MarketCandle[] = (body.items ?? []).map((c) => ({
+    time: c.time,
+    open: mid(c.open_bid, c.open_ask),
+    high: mid(c.high_bid, c.high_ask),
+    low: mid(c.low_bid, c.low_ask),
+    close: mid(c.close_bid, c.close_ask),
+  }));
   return {
     category,
-    symbol: logicalSymbol,
-    resolution: resolutionInput,
+    symbol: body.symbol || symbol,
+    resolution: body.resolution,
     candles,
   };
 }
 
-export function normalizeFinnhubSearchResults(
-  result: Array<{ symbol?: string; description?: string; displaySymbol?: string }> | undefined,
-  filter?: string,
-): MarketSymbolsPage {
-  let items: MarketSymbolRow[] = (result ?? []).map((r) => ({
-    symbol: r.displaySymbol ?? r.symbol ?? "",
-    name: r.description ?? r.symbol ?? "",
+export function normalizeSymbolsPage(body: TwSymbolsPageBody, filter?: string): MarketSymbolsPage {
+  let items: MarketSymbolRow[] = (body.items ?? []).map((r) => ({
+    symbol: r.symbol,
+    name: r.name,
   }));
   if (filter?.trim()) {
     const f = filter.trim().toLowerCase();
@@ -94,37 +104,10 @@ export function normalizeFinnhubSearchResults(
   }
   return {
     items,
-    cursor: { next: null, previous: null },
-    total: items.length,
-  };
-}
-
-export function normalizeSymbolListPage(
-  rows: Array<{ symbol?: string; description?: string; displaySymbol?: string }>,
-  offset: number,
-  size: number,
-  filter?: string,
-): MarketSymbolsPage {
-  let items: MarketSymbolRow[] = rows.map((r) => ({
-    symbol: r.displaySymbol ?? r.symbol ?? "",
-    name: r.description ?? r.symbol ?? "",
-  }));
-  if (filter?.trim()) {
-    const f = filter.trim().toLowerCase();
-    items = items.filter(
-      (r) => r.symbol.toLowerCase().includes(f) || r.name.toLowerCase().includes(f),
-    );
-  }
-  const total = items.length;
-  const slice = items.slice(offset, offset + size);
-  const nextOffset = offset + size < total ? String(offset + size) : null;
-  const prevOffset = offset > 0 ? String(Math.max(0, offset - size)) : null;
-  return {
-    items: slice,
     cursor: {
-      next: nextOffset,
-      previous: prevOffset,
+      next: body.next_page ?? null,
+      previous: body.previous_page ?? null,
     },
-    total,
+    total: body.total ?? null,
   };
 }
