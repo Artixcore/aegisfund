@@ -1,14 +1,11 @@
 import { ENV } from "../../_core/env";
 import { postOpenAiCompatibleChatCompletions } from "../openaiCompatibleChat";
+import { resolveLegacyChatCompletionsUrl } from "../openaiCompatibleUrl";
 import type { InvokeParams, InvokeResult } from "../types";
 import { OpenAiCompatLlmProvider } from "./openAiCompatProvider";
 
 function legacyCompletionsUrl(): string {
-  const base = ENV.llmBaseUrl?.trim() ?? "";
-  if (base.length > 0) {
-    return `${base.replace(/\/$/, "")}/v1/chat/completions`;
-  }
-  return "https://api.openai.com/v1/chat/completions";
+  return resolveLegacyChatCompletionsUrl(ENV.llmBaseUrl ?? "");
 }
 
 export class LegacyOpenAiCompatProvider extends OpenAiCompatLlmProvider {

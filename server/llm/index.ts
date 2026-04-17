@@ -15,6 +15,10 @@ export {
   postOpenAiCompatibleChatCompletions,
   stripLlmRouting,
 } from "./openaiCompatibleChat";
+export {
+  DEFAULT_OPENAI_CHAT_COMPLETIONS_URL,
+  resolveLegacyChatCompletionsUrl,
+} from "./openaiCompatibleUrl";
 export { createDeepseekProvider } from "./providers/deepseek";
 export { createGeminiProvider } from "./providers/gemini";
 export { createGrokProvider } from "./providers/grok";
