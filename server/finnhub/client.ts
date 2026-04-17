@@ -1,5 +1,5 @@
-export class TradeWatchHttpError extends Error {
-  readonly name = "TradeWatchHttpError";
+export class FinnhubHttpError extends Error {
+  readonly name = "FinnhubHttpError";
 
   constructor(
     readonly status: number,
@@ -11,7 +11,7 @@ export class TradeWatchHttpError extends Error {
   }
 }
 
-export type TradeWatchClientOptions = {
+export type FinnhubClientOptions = {
   baseUrl: string;
   apiKey: string;
 };
@@ -22,16 +22,17 @@ function joinBaseAndPath(baseUrl: string, path: string): string {
   return `${base}${p}`;
 }
 
-export type TradeWatchClient = {
+export type FinnhubClient = {
   getJson<T>(path: string, query?: Record<string, string | number | undefined>): Promise<T>;
 };
 
-export function createTradeWatchClient(options: TradeWatchClientOptions): TradeWatchClient {
+export function createFinnhubClient(options: FinnhubClientOptions): FinnhubClient {
   const { baseUrl, apiKey } = options;
 
   return {
     async getJson<T>(path: string, query?: Record<string, string | number | undefined>): Promise<T> {
       const url = new URL(joinBaseAndPath(baseUrl, path));
+      url.searchParams.set("token", apiKey);
       if (query) {
         for (const [k, v] of Object.entries(query)) {
           if (v === undefined || v === "") continue;
@@ -41,10 +42,7 @@ export function createTradeWatchClient(options: TradeWatchClientOptions): TradeW
 
       const res = await fetch(url.toString(), {
         method: "GET",
-        headers: {
-          accept: "application/json",
-          "api-key": apiKey,
-        },
+        headers: { accept: "application/json" },
       });
 
       const text = await res.text();
@@ -60,10 +58,10 @@ export function createTradeWatchClient(options: TradeWatchClientOptions): TradeW
           typeof body === "object" && body !== null
             ? JSON.stringify(body).slice(0, 500)
             : String(text).slice(0, 500);
-        console.error(`[TradeWatch] ${res.status} ${path}: ${snippet}`);
-        throw new TradeWatchHttpError(
+        console.error(`[Finnhub] ${res.status} ${path}: ${snippet}`);
+        throw new FinnhubHttpError(
           res.status,
-          `TradeWatch request failed (${res.status})`,
+          `Finnhub request failed (${res.status})`,
           path,
           snippet,
         );

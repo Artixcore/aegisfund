@@ -20,7 +20,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
 import { systemRouter } from "./_core/systemRouter";
-import { tradewatchRouter } from "./market/tradewatchRouter";
+import { marketRouter } from "./market/marketRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { callDataApi } from "./_core/dataApi";
 import {
@@ -38,6 +38,10 @@ import { fetchCryptoSpotPrices, fetchCryptoSpotPriceMap } from "./cryptoPrices";
 import { getBtcRestApiBase, getEthRpcUrl, getSolRpcUrl } from "./wallet/chainEndpoints";
 import { pickPrimaryAddressForChain } from "./wallet/pickPrimaryAddress";
 import { validateReceiveAddresses } from "./wallet/validateReceiveAddresses";
+import {
+  runAutomatedKycVerification,
+  type AutomatedKycOutcome,
+} from "./kyc/automatedVerification";
 import {
   createAgentRun,
   createMessage,
@@ -802,18 +806,45 @@ const kycRouter = router({
       return { success: true };
     }),
 
-  saveSelfie: protectedProcedure
-    .input(z.object({ selfieUrl: z.string() }))
+  /**
+   * Runs automated verification (vision LLM when configured, else rules-only) and sets final status.
+   */
+  submitVerification: protectedProcedure
+    .input(z.object({ tier: z.enum(["basic", "enhanced", "institutional"]) }))
     .mutation(async ({ ctx, input }) => {
-      await upsertKycProfile(ctx.user.id, { selfieUrl: input.selfieUrl, status: "pending" });
-      return { success: true };
+      await upsertKycProfile(ctx.user.id, {
+        tier: input.tier,
+        submittedAt: new Date(),
+        rejectionReason: null,
+      });
+      let outcome: AutomatedKycOutcome;
+      try {
+        outcome = await runAutomatedKycVerification(ctx.user.id);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("KYC_VERIFICATION_MODE=llm")) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: msg });
+        }
+        throw e;
+      }
+      const fwd = ctx.req.headers["x-forwarded-for"];
+      const rawIp =
+        typeof fwd === "string" ? fwd.split(",")[0]?.trim() : ctx.req.socket?.remoteAddress ?? "";
+      const ipHash = rawIp ? createHash("sha256").update(rawIp).digest("hex") : null;
+      const profile = await getKycProfile(ctx.user.id);
+      await insertAuditLog({
+        actorUserId: ctx.user.id,
+        action: outcome.status === "approved" ? "kyc_auto_approved" : "kyc_auto_rejected",
+        resource: "kyc_profile",
+        resourceId: profile?.id ?? null,
+        metadata: {
+          tier: input.tier,
+          rejectionReason: outcome.rejectionReason ?? null,
+        },
+        ipHash,
+      });
+      return outcome;
     }),
-
-  submitForReview: protectedProcedure.mutation(async ({ ctx }) => {
-    await upsertKycProfile(ctx.user.id, { status: "under_review", submittedAt: new Date() });
-    await notifyOwner({ title: "New KYC Submission", content: `User ${ctx.user.name ?? ctx.user.openId} (ID: ${ctx.user.id}) submitted KYC for compliance review. Visit /admin/kyc to review.` });
-    return { success: true };
-  }),
 
   // Upload document image to S3 and return the CDN URL
   uploadDocument: protectedProcedure
@@ -836,18 +867,21 @@ const kycRouter = router({
       return { url };
     }),
 
-  // Upload selfie image to S3 and return the CDN URL
+  // Upload selfie image to S3 (slot 1–3) and persist URL on the KYC profile
   uploadSelfie: protectedProcedure
     .input(z.object({
       fileBase64: z.string(),
       mimeType: z.string(),
+      slot: z.enum(["1", "2", "3"]),
     }))
     .mutation(async ({ ctx, input }) => {
       const buffer = Buffer.from(input.fileBase64, "base64");
       const ext = input.mimeType.split("/")[1] ?? "jpg";
-      const key = `kyc/${ctx.user.id}/selfie-${Date.now()}.${ext}`;
+      const key = `kyc/${ctx.user.id}/selfie-${input.slot}-${Date.now()}.${ext}`;
       const { url } = await storagePut(key, buffer, input.mimeType);
-      await upsertKycProfile(ctx.user.id, { selfieUrl: url });
+      const field =
+        input.slot === "1" ? "selfieUrl1" : input.slot === "2" ? "selfieUrl2" : "selfieUrl3";
+      await upsertKycProfile(ctx.user.id, { [field]: url, status: "pending" });
       return { url };
     }),
 });
@@ -1199,7 +1233,7 @@ export const appRouter = router({
     }),
   }),
   prices: pricesRouter,
-  market: tradewatchRouter,
+  market: marketRouter,
   wallet: walletRouter,
   messages: messagesRouter,
   agents: agentsRouter,

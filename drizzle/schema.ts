@@ -190,7 +190,11 @@ export const kycProfiles = mysqlTable("kyc_profiles", {
   documentNumber: varchar("documentNumber", { length: 128 }),
   documentFrontUrl: text("documentFrontUrl"),
   documentBackUrl: text("documentBackUrl"),
+  /** @deprecated Legacy single selfie; use selfieUrl1–3. Kept for DB backfill reads. */
   selfieUrl: text("selfieUrl"),
+  selfieUrl1: text("selfieUrl1"),
+  selfieUrl2: text("selfieUrl2"),
+  selfieUrl3: text("selfieUrl3"),
   rejectionReason: text("rejectionReason"),
   submittedAt: timestamp("submittedAt"),
   reviewedAt: timestamp("reviewedAt"),

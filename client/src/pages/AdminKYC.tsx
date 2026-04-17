@@ -32,6 +32,9 @@ type KycEntry = {
   documentFrontUrl: string | null;
   documentBackUrl: string | null;
   selfieUrl: string | null;
+  selfieUrl1: string | null;
+  selfieUrl2: string | null;
+  selfieUrl3: string | null;
   rejectionReason: string | null;
   submittedAt: Date | null;
   reviewedAt: Date | null;
@@ -180,12 +183,14 @@ function KycRow({ entry, onRefresh }: { entry: KycEntry; onRefresh: () => void }
             ))}
           </div>
 
-          {/* Document images */}
-          <div className="grid grid-cols-3 gap-3">
+          {/* Document + selfie images */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
               { label: "Document Front", url: entry.documentFrontUrl },
               { label: "Document Back", url: entry.documentBackUrl },
-              { label: "Selfie", url: entry.selfieUrl },
+              { label: "Selfie 1 (neutral)", url: entry.selfieUrl1 ?? entry.selfieUrl },
+              { label: "Selfie 2 (angle)", url: entry.selfieUrl2 },
+              { label: "Selfie 3 (with ID)", url: entry.selfieUrl3 },
             ].map(({ label, url }) => (
               <div key={label}>
                 <div className="text-xs font-mono text-muted-foreground mb-1.5">{label}</div>
@@ -277,7 +282,9 @@ export default function AdminKYC() {
             <span>ADMIN PANEL</span>
           </div>
           <h1 className="text-xl font-semibold tracking-tight">KYC Review</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Review and approve identity verification submissions.</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            New submissions are verified automatically. Use this panel to audit records or resolve legacy under_review rows.
+          </p>
         </div>
         <button
           onClick={() => { allKyc.refetch(); pendingKyc.refetch(); }}

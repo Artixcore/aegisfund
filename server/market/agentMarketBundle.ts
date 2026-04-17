@@ -1,4 +1,4 @@
-import { TradeWatchHttpError } from "../tradewatch/client";
+import { FinnhubHttpError } from "../finnhub/client";
 import { getMarketDataProvider } from "./marketDataService";
 import type { MarketCandle } from "./types";
 import type { MarketCategory } from "./types";
@@ -10,7 +10,7 @@ export type TwAgentInstrument = {
   label: string;
 };
 
-export type TradeWatchAgentAsset = {
+export type AgentMarketAsset = {
   category: MarketCategory;
   symbol: string;
   label: string;
@@ -27,11 +27,11 @@ export type TradeWatchAgentAsset = {
   dataError?: string;
 };
 
-export type TradeWatchAgentBook = {
+export type UnifiedMarketBook = {
   enabled: boolean;
   retrievedAt: string;
-  assets: TradeWatchAgentAsset[];
-  /** Set when TradeWatch was skipped or the bundle failed before per-asset fetch. */
+  assets: AgentMarketAsset[];
+  /** Set when the bundle was skipped or failed before per-asset fetch. */
   reason?: string;
 };
 
@@ -75,7 +75,7 @@ function observationsFromQuoteAndCandles(
     const rel = mid > 0 ? (spread / mid) * 100 : 0;
     obs.push(`Bid ${bid.toFixed(6)} / Ask ${ask.toFixed(6)}; mid ${mid.toFixed(6)} (spread ~ ${rel.toFixed(4)}% of mid).`);
   } else if (mid != null) {
-    obs.push(`Mid / last ${mid.toFixed(6)}.`);
+    obs.push(`Mid / last ${mid.toFixed(6)} (Finnhub L1 snapshot; bid/ask may equal last).`);
   }
   if (candles.length >= 2) {
     const last = candles[candles.length - 1];
@@ -88,7 +88,7 @@ function observationsFromQuoteAndCandles(
   return obs;
 }
 
-async function fetchOneAsset(instrument: TwAgentInstrument): Promise<TradeWatchAgentAsset> {
+async function fetchOneAsset(instrument: TwAgentInstrument): Promise<AgentMarketAsset> {
   const end = Math.floor(Date.now() / 1000);
   const start = end - 20 * 86_400;
   const provider = getMarketDataProvider();
@@ -96,7 +96,7 @@ async function fetchOneAsset(instrument: TwAgentInstrument): Promise<TradeWatchA
 
   try {
     const [quote, ohlc] = await Promise.all([
-      provider.getLastQuote({ category, symbol, precision: 8 }),
+      provider.getLastQuote({ category, symbol }),
       provider.getHistoricalOhlc({
         category,
         symbol,
@@ -143,12 +143,12 @@ async function fetchOneAsset(instrument: TwAgentInstrument): Promise<TradeWatchA
     };
   } catch (e) {
     const msg =
-      e instanceof TradeWatchHttpError
+      e instanceof FinnhubHttpError
         ? `HTTP ${e.status}`
         : e instanceof Error
           ? e.message
           : String(e);
-    console.warn(`[TradeWatch][agents] ${category}/${symbol}: ${msg}`);
+    console.warn(`[Finnhub][agents] ${category}/${symbol}: ${msg}`);
     return {
       category,
       symbol,
@@ -177,9 +177,9 @@ async function mapPool<T, R>(items: T[], concurrency: number, fn: (t: T) => Prom
 }
 
 /**
- * Fetches TradeWatch last quotes + daily OHLC for agent grounding. Caller must ensure API key is configured.
+ * Finnhub-backed quote + daily OHLC bundle for agent grounding. Caller must ensure FINNHUB_API_KEY is set.
  */
-export async function buildTradeWatchAgentBook(instruments: TwAgentInstrument[]): Promise<TradeWatchAgentBook> {
+export async function buildUnifiedMarketBook(instruments: TwAgentInstrument[]): Promise<UnifiedMarketBook> {
   const retrievedAt = new Date().toISOString();
   if (instruments.length === 0) {
     return { enabled: true, retrievedAt, assets: [] };

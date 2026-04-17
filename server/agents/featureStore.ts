@@ -1,8 +1,8 @@
 import { fetchBtcBalance, fetchEthBalance, fetchSolBalance } from "../blockchain";
 import { callDataApi } from "../_core/dataApi";
 import { ENV } from "../_core/env";
-import { buildTradeWatchAgentBook } from "../market/agentMarketBundle";
-import type { TradeWatchAgentBook, TwAgentInstrument } from "../market/agentMarketBundle";
+import { buildUnifiedMarketBook } from "../market/agentMarketBundle";
+import type { TwAgentInstrument, UnifiedMarketBook } from "../market/agentMarketBundle";
 import {
   getLatestPortfolioSnapshot,
   getPortfolioHistory,
@@ -10,7 +10,7 @@ import {
   getWalletsByUserId,
 } from "../db";
 
-export const DATASET_VERSION = "aegis-features-2026-04-16.4";
+export const DATASET_VERSION = "aegis-features-2026-04-16.5";
 
 export type AgentFeatureKey =
   | "market_analysis"
@@ -68,8 +68,8 @@ export type AgentFeatureSnapshot = {
   citations: FeatureCitation[];
   notes: string[];
   portfolioBook?: AgentPortfolioBook;
-  /** Unified TradeWatch REST snapshot (quotes + daily OHLC summaries). Optional when key missing or fetch failed. */
-  tradeWatchBook?: TradeWatchAgentBook;
+  /** Finnhub-backed snapshot (quotes + daily OHLC summaries). Optional when key missing or fetch failed. */
+  unifiedMarketBook?: UnifiedMarketBook;
 };
 
 export type BuildFeatureSnapshotOptions = {
@@ -111,47 +111,47 @@ const AGENT_YAHOO_SPECS: Record<AgentFeatureKey, YahooSpec[]> = {
   executive_briefing: [...CRYPTO_TRIO, ...MACRO_RISK],
 };
 
-/** TradeWatch REST symbols per desk; adjust tickers to match your TradeWatch subscription. */
-const TRADEWATCH_AGENT_SPECS: Record<AgentFeatureKey, TwAgentInstrument[]> = {
+/** Finnhub-oriented symbols per desk (see server/market/finnhubSymbol.ts resolver). */
+const FINNHUB_AGENT_SPECS: Record<AgentFeatureKey, TwAgentInstrument[]> = {
   crypto_monitoring: [
-    { category: "crypto", symbol: "BTCUSD", label: "Bitcoin" },
-    { category: "crypto", symbol: "ETHUSD", label: "Ethereum" },
-    { category: "crypto", symbol: "SOLUSD", label: "Solana" },
+    { category: "crypto", symbol: "BTCUSDT", label: "Bitcoin" },
+    { category: "crypto", symbol: "ETHUSDT", label: "Ethereum" },
+    { category: "crypto", symbol: "SOLUSDT", label: "Solana" },
   ],
   forex_monitoring: [
     { category: "currencies", symbol: "EURUSD", label: "EUR/USD" },
     { category: "currencies", symbol: "GBPUSD", label: "GBP/USD" },
     { category: "currencies", symbol: "USDJPY", label: "USD/JPY" },
-    { category: "indices", symbol: "USDX", label: "USD index (DXY-style proxy)" },
+    { category: "stocks", symbol: "UUP", label: "USD strength (ETF proxy)" },
   ],
   futures_commodities: [
-    { category: "commodities", symbol: "XAUUSD", label: "Gold" },
-    { category: "commodities", symbol: "USOIL", label: "Crude oil (WTI-style proxy)" },
-    { category: "indices", symbol: "US500", label: "S&P 500 (index CFD proxy)" },
+    { category: "commodities", symbol: "GLD", label: "Gold (ETF)" },
+    { category: "commodities", symbol: "USO", label: "Crude oil (ETF)" },
+    { category: "indices", symbol: "SPY", label: "S&P 500 (ETF)" },
   ],
   market_analysis: [
-    { category: "crypto", symbol: "BTCUSD", label: "Bitcoin" },
-    { category: "crypto", symbol: "ETHUSD", label: "Ethereum" },
-    { category: "crypto", symbol: "SOLUSD", label: "Solana" },
+    { category: "crypto", symbol: "BTCUSDT", label: "Bitcoin" },
+    { category: "crypto", symbol: "ETHUSDT", label: "Ethereum" },
+    { category: "crypto", symbol: "SOLUSDT", label: "Solana" },
     { category: "currencies", symbol: "EURUSD", label: "EUR/USD" },
-    { category: "indices", symbol: "US500", label: "S&P 500 (proxy)" },
-    { category: "commodities", symbol: "XAUUSD", label: "Gold" },
+    { category: "indices", symbol: "SPY", label: "S&P 500 (ETF)" },
+    { category: "commodities", symbol: "GLD", label: "Gold (ETF)" },
     { category: "stocks", symbol: "AAPL", label: "Apple" },
   ],
   historical_research: [
-    { category: "crypto", symbol: "BTCUSD", label: "Bitcoin" },
-    { category: "crypto", symbol: "ETHUSD", label: "Ethereum" },
-    { category: "crypto", symbol: "SOLUSD", label: "Solana" },
+    { category: "crypto", symbol: "BTCUSDT", label: "Bitcoin" },
+    { category: "crypto", symbol: "ETHUSDT", label: "Ethereum" },
+    { category: "crypto", symbol: "SOLUSDT", label: "Solana" },
     { category: "currencies", symbol: "EURUSD", label: "EUR/USD" },
-    { category: "indices", symbol: "US500", label: "S&P 500 (proxy)" },
-    { category: "commodities", symbol: "XAUUSD", label: "Gold" },
+    { category: "indices", symbol: "SPY", label: "S&P 500 (ETF)" },
+    { category: "commodities", symbol: "GLD", label: "Gold (ETF)" },
   ],
   executive_briefing: [
-    { category: "crypto", symbol: "BTCUSD", label: "Bitcoin" },
-    { category: "crypto", symbol: "ETHUSD", label: "Ethereum" },
+    { category: "crypto", symbol: "BTCUSDT", label: "Bitcoin" },
+    { category: "crypto", symbol: "ETHUSDT", label: "Ethereum" },
     { category: "currencies", symbol: "EURUSD", label: "EUR/USD" },
-    { category: "indices", symbol: "US500", label: "S&P 500 (proxy)" },
-    { category: "commodities", symbol: "XAUUSD", label: "Gold" },
+    { category: "indices", symbol: "SPY", label: "S&P 500 (ETF)" },
+    { category: "commodities", symbol: "GLD", label: "Gold (ETF)" },
   ],
 };
 
@@ -398,46 +398,46 @@ export async function buildFeatureSnapshot(
 
   const notes: string[] = [];
 
-  let tradeWatchBook: TradeWatchAgentBook | undefined;
-  if (ENV.tradewatchApiKey.trim()) {
+  let unifiedMarketBook: UnifiedMarketBook | undefined;
+  if (ENV.finnhubApiKey.trim()) {
     try {
-      const twSpecs = TRADEWATCH_AGENT_SPECS[agentType];
-      tradeWatchBook = await buildTradeWatchAgentBook(twSpecs);
+      const fhSpecs = FINNHUB_AGENT_SPECS[agentType];
+      unifiedMarketBook = await buildUnifiedMarketBook(fhSpecs);
       citations.push({
-        id: "tradewatch-rest",
-        label: "TradeWatch REST: last quote + daily OHLC bundle for this agent",
-        source: "internal:tradewatch/agentMarketBundle",
+        id: "finnhub-rest",
+        label: "Finnhub REST: quote + daily candles bundle for this agent",
+        source: "internal:finnhub/agentMarketBundle",
         retrievedAt: new Date().toISOString(),
       });
-      const ok = tradeWatchBook.assets.filter((a) => !a.dataError).length;
-      const bad = tradeWatchBook.assets.length - ok;
+      const ok = unifiedMarketBook.assets.filter((a) => !a.dataError).length;
+      const bad = unifiedMarketBook.assets.length - ok;
       if (bad > 0) {
         notes.push(
-          `TradeWatch: ${ok}/${tradeWatchBook.assets.length} instruments returned clean quotes/OHLC; others include dataError - cite carefully.`,
+          `Finnhub: ${ok}/${unifiedMarketBook.assets.length} instruments returned clean quotes/OHLC; others include dataError - cite carefully.`,
         );
       }
-      if (ok === 0 && tradeWatchBook.assets.length > 0) {
-        notes.push("TradeWatch bundle returned only errors; rely on Yahoo prices and avoid inventing levels.");
+      if (ok === 0 && unifiedMarketBook.assets.length > 0) {
+        notes.push("Finnhub bundle returned only errors; rely on Yahoo prices and avoid inventing levels.");
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.error("[TradeWatch][agents] bundle failed:", msg);
-      tradeWatchBook = {
+      console.error("[Finnhub][agents] bundle failed:", msg);
+      unifiedMarketBook = {
         enabled: false,
         retrievedAt: new Date().toISOString(),
         assets: [],
         reason: msg,
       };
-      notes.push("TradeWatch bundle failed; using Yahoo snapshot only for numeric marks.");
+      notes.push("Finnhub bundle failed; using Yahoo snapshot only for numeric marks.");
     }
   } else {
-    tradeWatchBook = {
+    unifiedMarketBook = {
       enabled: false,
       retrievedAt: new Date().toISOString(),
       assets: [],
-      reason: "TRADEWATCH_API_KEY not configured",
+      reason: "FINNHUB_API_KEY not configured",
     };
-    notes.push("TradeWatch not configured; tradeWatchBook.disabled - use Yahoo prices only.");
+    notes.push("Finnhub not configured; unifiedMarketBook.disabled - use Yahoo prices only.");
   }
 
 
@@ -543,7 +543,7 @@ export async function buildFeatureSnapshot(
     prices,
     citations,
     notes,
-    ...(tradeWatchBook ? { tradeWatchBook } : {}),
+    ...(unifiedMarketBook ? { unifiedMarketBook } : {}),
     ...(portfolioBook ? { portfolioBook } : {}),
   };
 }

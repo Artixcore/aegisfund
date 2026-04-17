@@ -57,7 +57,9 @@ export default function KYC() {
     documentBackUrl: "",
   });
 
-  const [selfieUrl, setSelfieUrl] = useState("");
+  const [selfieUrl1, setSelfieUrl1] = useState("");
+  const [selfieUrl2, setSelfieUrl2] = useState("");
+  const [selfieUrl3, setSelfieUrl3] = useState("");
 
   const { data: kycStatus, refetch } = trpc.kyc.getStatus.useQuery();
 
@@ -68,11 +70,6 @@ export default function KYC() {
 
   const saveDocument = trpc.kyc.saveDocumentInfo.useMutation({
     onSuccess: () => { setStep(3); },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const saveSelfie = trpc.kyc.saveSelfie.useMutation({
-    onSuccess: () => { setStep(4); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -105,20 +102,27 @@ export default function KYC() {
     } catch { toast.dismiss(toastId); }
   };
 
-  const handleSelfieUpload = async (file: File) => {
+  const handleSelfieUpload = async (slot: "1" | "2" | "3", file: File) => {
     if (file.size > 16 * 1024 * 1024) { toast.error("File too large (max 16 MB)"); return; }
-    toast.loading("Uploading selfie...", { id: "upload-selfie" });
+    const tid = `upload-selfie-${slot}`;
+    toast.loading("Uploading...", { id: tid });
     try {
       const fileBase64 = await fileToBase64(file);
-      const result = await uploadSelfie.mutateAsync({ fileBase64, mimeType: file.type });
-      setSelfieUrl(result.url);
-      toast.success("Selfie uploaded successfully", { id: "upload-selfie" });
-    } catch { toast.dismiss("upload-selfie"); }
+      const result = await uploadSelfie.mutateAsync({ fileBase64, mimeType: file.type, slot });
+      if (slot === "1") setSelfieUrl1(result.url);
+      if (slot === "2") setSelfieUrl2(result.url);
+      if (slot === "3") setSelfieUrl3(result.url);
+      toast.success(`Selfie ${slot} saved`, { id: tid });
+    } catch { toast.dismiss(tid); }
   };
 
-  const submitReview = trpc.kyc.submitForReview.useMutation({
-    onSuccess: () => {
-      toast.success("KYC submitted for review. You will be notified within 24-48 hours.");
+  const submitVerification = trpc.kyc.submitVerification.useMutation({
+    onSuccess: (data) => {
+      if (data.status === "approved") {
+        toast.success("Identity verified. Welcome to Aegis Fund.");
+      } else {
+        toast.error(data.rejectionReason ?? "Verification did not pass.");
+      }
       refetch();
     },
     onError: (e) => toast.error(e.message),
@@ -178,7 +182,9 @@ export default function KYC() {
           <span>IDENTITY VERIFICATION</span>
         </div>
         <h1 className="text-xl font-semibold tracking-tight">KYC Onboarding</h1>
-        <p className="text-sm text-muted-foreground mt-1">Complete identity verification to unlock full platform access.</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Complete identity verification to unlock full platform access. Submissions are checked automatically (document + selfie).
+        </p>
       </div>
 
       {/* Progress steps */}
@@ -346,6 +352,11 @@ export default function KYC() {
               />
             </div>
           </div>
+          {docInfo.documentType !== "Passport" && (
+            <p className="text-xs text-muted-foreground">
+              For this document type, both front and back images are required for verification.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-4">
             {(["front", "back"] as const).map((side) => {
               const key = side === "front" ? "documentFrontUrl" : "documentBackUrl";
@@ -354,7 +365,7 @@ export default function KYC() {
               return (
                 <div key={side}>
                   <label className="text-xs font-mono text-muted-foreground block mb-1.5">
-                    {side === "front" ? "Front of Document" : "Back of Document"}
+                    {side === "front" ? "Front of Document" : docInfo.documentType === "Passport" ? "Back (optional)" : "Back of Document"}
                   </label>
                   <label className={`w-full h-28 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-2 transition-colors cursor-pointer ${
                     isUploaded ? "border-aegis-green/40 bg-aegis-green/5" : "border-border hover:border-foreground/30"
@@ -385,6 +396,10 @@ export default function KYC() {
             <button
               onClick={() => {
                 if (!docInfo.documentNumber) { toast.error("Please enter document number"); return; }
+                if (docInfo.documentType !== "Passport" && !docInfo.documentBackUrl) {
+                  toast.error("Please upload the back of your document for this ID type.");
+                  return;
+                }
                 saveDocument.mutate(docInfo);
               }}
               disabled={saveDocument.isPending}
@@ -396,42 +411,60 @@ export default function KYC() {
         </div>
       )}
 
-      {/* Step 3: Selfie */}
+      {/* Step 3: Three selfies */}
       {step === 3 && (
         <div className="aegis-card space-y-5">
-          <div className="mono-label">Liveness Check</div>
-          <p className="text-sm text-muted-foreground">Take a selfie holding your ID document. Ensure your face and document are clearly visible.</p>
-          <label className={`w-full h-48 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-3 transition-colors cursor-pointer ${
-            selfieUrl ? "border-aegis-green/40 bg-aegis-green/5" : uploadSelfie.isPending ? "border-border" : "border-border hover:border-foreground/30"
-          }`}>
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleSelfieUpload(file);
-              }}
-            />
-            {selfieUrl ? (
-              <><CheckCircle2 size={32} className="text-aegis-green" /><span className="text-sm font-mono text-aegis-green">Selfie uploaded ✓</span><span className="text-xs text-muted-foreground">Click to replace</span></>
-            ) : uploadSelfie.isPending ? (
-              <><div className="w-16 h-16 rounded-full border-2 border-dashed border-muted-foreground flex items-center justify-center animate-pulse"><User size={24} className="text-muted-foreground" /></div><span className="text-sm text-muted-foreground">Uploading...</span></>
-            ) : (
-              <><div className="w-16 h-16 rounded-full border-2 border-dashed border-muted-foreground flex items-center justify-center"><User size={24} className="text-muted-foreground" /></div><span className="text-sm text-muted-foreground">Click to upload selfie</span><span className="text-xs text-muted-foreground/60">JPG or PNG · max 16 MB</span></>
-            )}
-          </label>
+          <div className="mono-label">Three verification photos</div>
+          <p className="text-sm text-muted-foreground">
+            Upload three different photos. Automated checks compare them to your ID and to each other—similar or duplicate shots will fail.
+          </p>
+          {(
+            [
+              { slot: "1" as const, title: "1 — Neutral face", hint: "Face centered, even lighting, looking at the camera." },
+              { slot: "2" as const, title: "2 — Head turn", hint: "Turn your head slightly left or right (different angle than photo 1)." },
+              { slot: "3" as const, title: "3 — Holding ID", hint: "Hold your ID next to your face; both must be clearly visible." },
+            ] as const
+          ).map(({ slot, title, hint }) => {
+            const url = slot === "1" ? selfieUrl1 : slot === "2" ? selfieUrl2 : selfieUrl3;
+            const done = !!url;
+            return (
+              <div key={slot} className="space-y-2">
+                <div className="text-xs font-mono text-muted-foreground">{title}</div>
+                <p className="text-[11px] text-muted-foreground/90">{hint}</p>
+                <label className={`w-full min-h-36 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-2 py-6 px-3 transition-colors cursor-pointer ${
+                  done ? "border-aegis-green/40 bg-aegis-green/5" : uploadSelfie.isPending ? "border-border" : "border-border hover:border-foreground/30"
+                }`}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleSelfieUpload(slot, file);
+                    }}
+                  />
+                  {done ? (
+                    <><CheckCircle2 size={28} className="text-aegis-green" /><span className="text-sm font-mono text-aegis-green">Uploaded ✓</span><span className="text-xs text-muted-foreground">Click to replace</span></>
+                  ) : (
+                    <><User size={24} className="text-muted-foreground" /><span className="text-sm text-muted-foreground">Click to upload</span><span className="text-[10px] text-muted-foreground/60">JPG or PNG · max 16 MB</span></>
+                  )}
+                </label>
+              </div>
+            );
+          })}
           <div className="flex gap-3">
             <button onClick={() => setStep(2)} className="flex-1 py-2.5 border border-border rounded-lg text-sm hover:border-foreground/30 transition-colors">Back</button>
             <button
               onClick={() => {
-                if (!selfieUrl) { toast.error("Please capture a selfie"); return; }
-                saveSelfie.mutate({ selfieUrl });
+                if (!selfieUrl1 || !selfieUrl2 || !selfieUrl3) {
+                  toast.error("Please upload all three verification photos.");
+                  return;
+                }
+                setStep(4);
               }}
-              disabled={saveSelfie.isPending}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-foreground text-background text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-foreground text-background text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
             >
-              {saveSelfie.isPending ? "Saving..." : "Continue"} <ArrowRight size={14} />
+              Continue <ArrowRight size={14} />
             </button>
           </div>
         </div>
@@ -451,6 +484,9 @@ export default function KYC() {
                 { label: "Document Type", value: docInfo.documentType },
                 { label: "Document Number", value: docInfo.documentNumber },
                 { label: "Verification Tier", value: selectedTier.charAt(0).toUpperCase() + selectedTier.slice(1) },
+                { label: "Selfie 1 (neutral)", value: selfieUrl1 ? "Uploaded" : "—" },
+                { label: "Selfie 2 (angle)", value: selfieUrl2 ? "Uploaded" : "—" },
+                { label: "Selfie 3 (with ID)", value: selfieUrl3 ? "Uploaded" : "—" },
               ].map(({ label, value }) => (
                 <div key={label} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                   <span className="text-xs font-mono text-muted-foreground">{label}</span>
@@ -471,11 +507,15 @@ export default function KYC() {
           <div className="flex gap-3">
             <button onClick={() => setStep(3)} className="flex-1 py-2.5 border border-border rounded-lg text-sm hover:border-foreground/30 transition-colors">Back</button>
             <button
-              onClick={() => submitReview.mutate()}
-              disabled={submitReview.isPending}
+              onClick={() =>
+                submitVerification.mutate({
+                  tier: selectedTier as "basic" | "enhanced" | "institutional",
+                })
+              }
+              disabled={submitVerification.isPending}
               className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-foreground text-background text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
-              {submitReview.isPending ? "Submitting..." : "Submit for Review"} <ShieldCheck size={14} />
+              {submitVerification.isPending ? "Verifying..." : "Verify identity"} <ShieldCheck size={14} />
             </button>
           </div>
         </div>

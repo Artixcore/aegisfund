@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { ENV } from "../_core/env";
+import { FinnhubHttpError } from "../finnhub/client";
 import { publicProcedure, router } from "../_core/trpc";
-import { TradeWatchHttpError } from "../tradewatch/client";
 import { getMarketDataProvider } from "./marketDataService";
 import { MARKET_CATEGORY_INFO, MARKET_CATEGORIES } from "./types";
 
@@ -27,56 +27,56 @@ const historicalResolutionSchema = z.enum([
   "172800",
 ]);
 
-function requireTradewatchConfigured() {
-  if (!ENV.tradewatchApiKey.trim()) {
+function requireFinnhubConfigured() {
+  if (!ENV.finnhubApiKey.trim()) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: "TradeWatch is not configured. Set TRADEWATCH_API_KEY in the environment.",
+      message: "Finnhub is not configured. Set FINNHUB_API_KEY in the environment.",
     });
   }
 }
 
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof TRPCError) return err;
-  if (err instanceof TradeWatchHttpError) {
+  if (err instanceof FinnhubHttpError) {
     const detail = err.responseBody ?? err.message;
     if (err.status === 401) {
-      return new TRPCError({ code: "UNAUTHORIZED", message: "TradeWatch rejected the API key." });
+      return new TRPCError({ code: "UNAUTHORIZED", message: "Finnhub rejected the API token." });
     }
     if (err.status === 403) {
-      return new TRPCError({ code: "FORBIDDEN", message: "TradeWatch denied access for this request." });
+      return new TRPCError({ code: "FORBIDDEN", message: "Finnhub denied access for this request." });
     }
     if (err.status === 404) {
-      return new TRPCError({ code: "NOT_FOUND", message: "TradeWatch returned not found for this resource." });
+      return new TRPCError({ code: "NOT_FOUND", message: "Finnhub returned not found for this resource." });
     }
     if (err.status === 422) {
       return new TRPCError({
         code: "BAD_REQUEST",
-        message: `TradeWatch validation error: ${detail}`,
+        message: `Finnhub validation error: ${detail}`,
       });
     }
     if (err.status === 429) {
-      return new TRPCError({ code: "TOO_MANY_REQUESTS", message: "TradeWatch rate limit exceeded. Try again later." });
+      return new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Finnhub rate limit exceeded. Try again later." });
     }
     if (err.status >= 500) {
       return new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "TradeWatch service error. Please try again later.",
+        message: "Finnhub service error. Please try again later.",
       });
     }
     return new TRPCError({
       code: "BAD_REQUEST",
-      message: `TradeWatch request failed: ${detail}`,
+      message: `Finnhub request failed: ${detail}`,
     });
   }
-  console.error("[TradeWatch] Unexpected error:", err);
+  console.error("[Finnhub] Unexpected error:", err);
   return new TRPCError({
     code: "INTERNAL_SERVER_ERROR",
-    message: err instanceof Error ? err.message : "Unexpected error calling TradeWatch",
+    message: err instanceof Error ? err.message : "Unexpected error calling Finnhub",
   });
 }
 
-export const tradewatchRouter = router({
+export const marketRouter = router({
   listCategories: publicProcedure.query(() => ({
     categories: MARKET_CATEGORY_INFO,
   })),
@@ -90,7 +90,7 @@ export const tradewatchRouter = router({
       }),
     )
     .query(async ({ input }) => {
-      requireTradewatchConfigured();
+      requireFinnhubConfigured();
       try {
         return await getMarketDataProvider().getLastQuote(input);
       } catch (e) {
@@ -100,18 +100,14 @@ export const tradewatchRouter = router({
 
   getQuotes: publicProcedure
     .input(
-      z
-        .object({
-          category: marketCategorySchema,
-          symbols: z.array(z.string().min(1).max(64)).min(1).max(40),
-          precision: z.number().int().min(0).max(18).optional(),
-        })
-        .refine((v) => v.symbols.join(",").length <= 50, {
-          message: "Combined symbols (comma-separated) must be at most 50 characters per TradeWatch API limits.",
-        }),
+      z.object({
+        category: marketCategorySchema,
+        symbols: z.array(z.string().min(1).max(64)).min(1).max(40),
+        precision: z.number().int().min(0).max(18).optional(),
+      }),
     )
     .query(async ({ input }) => {
-      requireTradewatchConfigured();
+      requireFinnhubConfigured();
       try {
         return await getMarketDataProvider().getLastQuotes(input);
       } catch (e) {
@@ -132,7 +128,7 @@ export const tradewatchRouter = router({
         .refine((v) => v.end > v.start, { message: "`end` must be greater than `start` (Unix seconds)." }),
     )
     .query(async ({ input }) => {
-      requireTradewatchConfigured();
+      requireFinnhubConfigured();
       try {
         return await getMarketDataProvider().getHistoricalOhlc(input);
       } catch (e) {
@@ -153,7 +149,7 @@ export const tradewatchRouter = router({
       }),
     )
     .query(async ({ input }) => {
-      requireTradewatchConfigured();
+      requireFinnhubConfigured();
       try {
         return await getMarketDataProvider().listSymbols(input);
       } catch (e) {

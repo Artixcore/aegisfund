@@ -31,10 +31,10 @@ export const ENV = {
   dataServiceApiKey:
     process.env.AEGIS_DATA_API_KEY ?? process.env.BUILT_IN_FORGE_API_KEY ?? "",
 
-  /** TradeWatch REST API (https://tradewatch.io/docs). Required for `market.*` tRPC procedures. */
-  tradewatchApiKey: process.env.TRADEWATCH_API_KEY?.trim() ?? "",
-  /** Override API host for staging; default production `https://api.tradewatch.io`. */
-  tradewatchBaseUrl: process.env.TRADEWATCH_BASE_URL?.trim() || "https://api.tradewatch.io",
+  /** Finnhub REST API (https://finnhub.io/docs/api). Required for `market.*` tRPC procedures. */
+  finnhubApiKey: process.env.FINNHUB_API_KEY?.trim() ?? "",
+  /** Default `https://finnhub.io/api/v1`. */
+  finnhubBaseUrl: process.env.FINNHUB_BASE_URL?.trim() || "https://finnhub.io/api/v1",
 
   /** OpenAI-compatible chat completions base (no path). Default: OpenAI public API. */
   llmBaseUrl: process.env.LLM_BASE_URL ?? "",
@@ -109,4 +109,28 @@ export const ENV = {
    * Required in production when writing encrypted columns (see server/fieldEncryption.ts).
    */
   databaseFieldEncryptionKey: process.env.DATABASE_FIELD_ENCRYPTION_KEY?.trim() ?? "",
+
+  /**
+   * Automated KYC: `auto` uses vision LLM when any LLM key is set, otherwise rules-only.
+   * `llm` requires an API key; `rules` checks form completeness only (no document AI).
+   */
+  kycVerificationMode: (() => {
+    const t = (process.env.KYC_VERIFICATION_MODE ?? "auto").trim().toLowerCase();
+    if (t === "llm" || t === "rules" || t === "auto") return t;
+    return "auto" as const;
+  })(),
+  /** Optional model override for vision verification (OpenAI-compatible). */
+  kycLlmModel: process.env.KYC_LLM_MODEL?.trim() ?? "",
+
+  /**
+   * Max Hamming distance (64-bit average hash) below which two selfies are "too similar."
+   * Set to `0` or `off` to skip server-side pose-diversity check (LLM still runs).
+   */
+  kycSelfiePoseMaxHamming: (() => {
+    const r = process.env.KYC_SELFIE_POSE_MAX_HAMMING?.trim();
+    if (r === undefined || r === "") return 10;
+    if (r === "0" || r.toLowerCase() === "off") return null;
+    const n = Number(r);
+    return Number.isFinite(n) && n > 0 ? n : 10;
+  })(),
 };

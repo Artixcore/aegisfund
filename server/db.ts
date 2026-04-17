@@ -527,6 +527,9 @@ const KYC_ENCRYPTED_TEXT_FIELDS = [
   "documentFrontUrl",
   "documentBackUrl",
   "selfieUrl",
+  "selfieUrl1",
+  "selfieUrl2",
+  "selfieUrl3",
   "rejectionReason",
 ] as const;
 
@@ -739,6 +742,9 @@ function mapAdminKycJoinRow<
     documentFrontUrl: string | null;
     documentBackUrl: string | null;
     selfieUrl: string | null;
+    selfieUrl1: string | null;
+    selfieUrl2: string | null;
+    selfieUrl3: string | null;
     rejectionReason: string | null;
     userName: string | null;
     userEmail: string | null;
@@ -776,6 +782,9 @@ export async function getAllKycProfiles() {
       documentFrontUrl: kycProfiles.documentFrontUrl,
       documentBackUrl: kycProfiles.documentBackUrl,
       selfieUrl: kycProfiles.selfieUrl,
+      selfieUrl1: kycProfiles.selfieUrl1,
+      selfieUrl2: kycProfiles.selfieUrl2,
+      selfieUrl3: kycProfiles.selfieUrl3,
       rejectionReason: kycProfiles.rejectionReason,
       submittedAt: kycProfiles.submittedAt,
       reviewedAt: kycProfiles.reviewedAt,
@@ -809,6 +818,9 @@ export async function getPendingKycProfiles() {
       documentFrontUrl: kycProfiles.documentFrontUrl,
       documentBackUrl: kycProfiles.documentBackUrl,
       selfieUrl: kycProfiles.selfieUrl,
+      selfieUrl1: kycProfiles.selfieUrl1,
+      selfieUrl2: kycProfiles.selfieUrl2,
+      selfieUrl3: kycProfiles.selfieUrl3,
       rejectionReason: kycProfiles.rejectionReason,
       submittedAt: kycProfiles.submittedAt,
       reviewedAt: kycProfiles.reviewedAt,
