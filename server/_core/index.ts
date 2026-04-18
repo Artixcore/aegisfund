@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./envBootstrap";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
