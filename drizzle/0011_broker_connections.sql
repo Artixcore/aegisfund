@@ -17,6 +17,8 @@ CREATE TABLE `broker_connections` (
   UNIQUE KEY `broker_connections_aad_key` (`credentialAadKey`)
 );
 
+--> statement-breakpoint
+
 CREATE TABLE `user_execution_prefs` (
   `userId` int NOT NULL,
   `defaultMode` enum('backtest','paper','live') NOT NULL DEFAULT 'backtest',

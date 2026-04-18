@@ -7,6 +7,8 @@ ALTER TABLE `agent_runs` MODIFY `agentType` ENUM(
   'executive_briefing'
 ) NOT NULL;
 
+--> statement-breakpoint
+
 ALTER TABLE `agent_schedules` MODIFY `agentType` ENUM(
   'market_analysis',
   'crypto_monitoring',
