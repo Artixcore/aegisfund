@@ -8,7 +8,7 @@ import { registerKycLocalFileRoute } from "../kyc/localFileRoute";
 import { getServerBuildInfo } from "./buildInfo";
 import { appRouter, startBackgroundServices } from "../routers";
 import { createContext } from "./context";
-import { serveStatic, setupVite } from "./vite";
+import { serveStatic } from "./staticServe";
 
 /** Fail fast in dev if the in-memory router does not match source (avoids silent TRPC 404s). */
 function assertAuthTrpcProceduresLoaded() {
@@ -75,6 +75,7 @@ async function startServer() {
   );
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
+    const { setupVite } = await import("./vite");
     await setupVite(app, server);
   } else {
     serveStatic(app);
