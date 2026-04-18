@@ -1,5 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { parseGrounding, stripGrounding, type AgentRunGroundingMeta } from "@shared/agentGrounding";
+import { ASSET_CLASS_LABELS, BROKER_ASSET_CLASSES } from "@shared/brokerVenues";
 import {
   Activity,
   AlertTriangle,
@@ -24,6 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useState } from "react";
+import { Link } from "wouter";
 import { toast } from "sonner";
 
 type AgentType =
@@ -581,6 +583,7 @@ export default function Agents() {
     refetchInterval: 5000,
   });
   const { data: schedules } = trpc.agents.getSchedules.useQuery();
+  const { data: tradingStatus } = trpc.trading.listStatus.useQuery(undefined, { staleTime: 60_000 });
 
   const [runningAgents, setRunningAgents] = useState<Set<AgentType>>(new Set());
   const [schedulingAgent, setSchedulingAgent] = useState<AgentType | null>(null);
@@ -652,6 +655,11 @@ export default function Agents() {
   const agentsWithNavOnlyBook =
     agentRuns?.filter((r) => parseGrounding(r.output)?.portfolioBook?.bookMode === "light").length ?? 0;
 
+  const missingBrokerClasses =
+    tradingStatus && tradingStatus.defaultMode !== "backtest"
+      ? BROKER_ASSET_CLASSES.filter((ac) => !tradingStatus.coverage[ac])
+      : [];
+
   return (
     <div className="p-6 space-y-6 animate-fade-up">
       {/* Header */}
@@ -660,6 +668,13 @@ export default function Agents() {
           <h1 className="text-xl font-semibold tracking-tight">AI Agents</h1>
           <p className="text-xs text-muted-foreground font-mono mt-0.5">
             Five specialist desks + portfolio trading + executive briefing · Auto-scheduling
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-2 max-w-xl leading-relaxed">
+            For automated paper or live execution (future order routing), add broker API keys under{" "}
+            <Link href="/settings" className="underline underline-offset-2 text-foreground/90 hover:text-foreground">
+              Settings → Trading connections
+            </Link>
+            . Analysis runs do not require keys; TradeWatch supplies market data only.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -689,6 +704,26 @@ export default function Agents() {
           </button>
         </div>
       </div>
+
+      {missingBrokerClasses.length > 0 && (
+        <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-xs">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={14} className="shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+            <div>
+              <p className="font-medium text-foreground">
+                Execution mode <span className="font-mono">{tradingStatus?.defaultMode}</span> — still need API keys for:{" "}
+                {missingBrokerClasses.map((ac) => ASSET_CLASS_LABELS[ac]).join(", ")}.
+              </p>
+              <Link
+                href="/settings"
+                className="inline-block mt-2 font-mono text-[11px] text-foreground underline underline-offset-2"
+              >
+                Open Trading connections
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Command overview strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">

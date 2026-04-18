@@ -21,6 +21,7 @@ import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
 import { systemRouter } from "./_core/systemRouter";
 import { tradewatchRouter } from "./market/tradewatchRouter";
+import { tradingRouter } from "./trading/tradingRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { callDataApi } from "./_core/dataApi";
 import {
@@ -1247,6 +1248,7 @@ export const appRouter = router({
   agents: agentsRouter,
   alerts: alertsRouter,
   portfolio: portfolioRouter,
+  trading: tradingRouter,
   settings: settingsRouter,
   kyc: kycRouter,
   admin: adminRouter,

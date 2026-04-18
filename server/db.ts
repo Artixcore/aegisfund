@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
+import { nanoid } from "nanoid";
 import { stripGrounding } from "@shared/agentGrounding";
 import {
   InsertUser,
@@ -8,15 +9,19 @@ import {
   agentRuns,
   agentSchedules,
   auditLogs,
+  brokerConnections,
   conversations,
   messages,
   portfolioSnapshots,
   priceAlerts,
+  userExecutionPrefs,
   userMessagingIdentities,
   users,
   wallets,
 } from "../drizzle/schema";
 import { kycProfiles, mfaSettings, userSessions, alertHistory, InsertKycProfile } from "../drizzle/schema";
+import type { BrokerAssetClass, BrokerCredentialPayload, SaveBrokerConnectionInput } from "./trading/brokerTypes";
+import { brokerCredentialPayloadSchema, keyHintFromApiKey } from "./trading/brokerTypes";
 import { ENV } from "./_core/env";
 import { assertFieldEncryptionForWrites, decryptUtf8Field, encryptUtf8Field } from "./fieldEncryption";
 import { resolveMysqlPoolOptions } from "../shared/mysqlUrl";
@@ -860,6 +865,202 @@ export async function reviewKycProfile(
       reviewedAt: new Date(),
     })
     .where(eq(kycProfiles.id, profileId));
+}
+
+// ============================================================
+// BROKER CONNECTIONS (encrypted BYOK; execution adapters consume via getDecrypted*)
+// ============================================================
+
+function brokerCredAad(aadKey: string): string {
+  return `broker_connections.cred.${aadKey}`;
+}
+
+export type MaskedBrokerConnection = {
+  id: number;
+  userId: number;
+  assetClass: BrokerAssetClass;
+  venue: string;
+  label: string | null;
+  environment: "paper" | "live";
+  keyHintSuffix: string | null;
+  isActive: boolean;
+  lastVerifiedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export async function listMaskedBrokerConnectionsForUser(userId: number): Promise<MaskedBrokerConnection[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: brokerConnections.id,
+      userId: brokerConnections.userId,
+      assetClass: brokerConnections.assetClass,
+      venue: brokerConnections.venue,
+      label: brokerConnections.label,
+      environment: brokerConnections.environment,
+      keyHintSuffix: brokerConnections.keyHintSuffix,
+      isActive: brokerConnections.isActive,
+      lastVerifiedAt: brokerConnections.lastVerifiedAt,
+      createdAt: brokerConnections.createdAt,
+      updatedAt: brokerConnections.updatedAt,
+    })
+    .from(brokerConnections)
+    .where(eq(brokerConnections.userId, userId))
+    .orderBy(desc(brokerConnections.updatedAt));
+  return rows.map((r) => ({
+    id: r.id,
+    userId: r.userId,
+    assetClass: r.assetClass as BrokerAssetClass,
+    venue: r.venue,
+    label: r.label,
+    environment: r.environment,
+    keyHintSuffix: r.keyHintSuffix,
+    isActive: r.isActive,
+    lastVerifiedAt: r.lastVerifiedAt,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  }));
+}
+
+export async function getUserExecutionPrefsRow(userId: number): Promise<{
+  defaultMode: "backtest" | "paper" | "live";
+}> {
+  const db = await getDb();
+  if (!db) return { defaultMode: "backtest" };
+  const rows = await db.select().from(userExecutionPrefs).where(eq(userExecutionPrefs.userId, userId)).limit(1);
+  if (rows.length === 0) return { defaultMode: "backtest" };
+  return { defaultMode: rows[0].defaultMode };
+}
+
+export async function upsertUserExecutionPrefs(
+  userId: number,
+  defaultMode: "backtest" | "paper" | "live",
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db
+    .insert(userExecutionPrefs)
+    .values({ userId, defaultMode })
+    .onDuplicateKeyUpdate({
+      set: { defaultMode, updatedAt: new Date() },
+    });
+}
+
+export async function saveBrokerConnectionEncrypted(
+  userId: number,
+  input: SaveBrokerConnectionInput,
+): Promise<{ id: number }> {
+  if (ENV.isProduction) assertFieldEncryptionForWrites();
+  const payload = JSON.stringify({
+    apiKey: input.credentials.apiKey,
+    ...(input.credentials.apiSecret != null && input.credentials.apiSecret !== ""
+      ? { apiSecret: input.credentials.apiSecret }
+      : {}),
+    ...(input.credentials.passphrase ? { passphrase: input.credentials.passphrase } : {}),
+    ...(input.credentials.baseUrlOverride?.trim()
+      ? { baseUrlOverride: input.credentials.baseUrlOverride.trim() }
+      : {}),
+  });
+  if (payload.length > 48_000) throw new Error("Credentials payload too large");
+
+  const keyHint = keyHintFromApiKey(input.credentials.apiKey);
+
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+
+  if (input.id != null) {
+    const existing = await db
+      .select()
+      .from(brokerConnections)
+      .where(and(eq(brokerConnections.id, input.id), eq(brokerConnections.userId, userId)))
+      .limit(1);
+    if (existing.length === 0) throw new Error("Connection not found");
+    const row = existing[0];
+    const enc = encryptUtf8Field(payload, brokerCredAad(row.credentialAadKey));
+    if (!enc) throw new Error("Encryption failed");
+    await db
+      .update(brokerConnections)
+      .set({
+        assetClass: input.assetClass,
+        venue: input.venue,
+        label: input.label ?? null,
+        environment: input.environment,
+        credentialsEncrypted: enc,
+        keyHintSuffix: keyHint,
+        updatedAt: new Date(),
+      })
+      .where(eq(brokerConnections.id, input.id));
+    return { id: input.id };
+  }
+
+  const credentialAadKey = nanoid(32);
+  const enc = encryptUtf8Field(payload, brokerCredAad(credentialAadKey));
+  if (!enc) throw new Error("Encryption failed");
+
+  const [result] = await db.insert(brokerConnections).values({
+    userId,
+    assetClass: input.assetClass,
+    venue: input.venue,
+    label: input.label ?? null,
+    environment: input.environment,
+    credentialAadKey,
+    credentialsEncrypted: enc,
+    keyHintSuffix: keyHint,
+    isActive: true,
+  });
+  return { id: (result as { insertId: number }).insertId };
+}
+
+export async function deleteBrokerConnection(userId: number, connectionId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const existing = await db
+    .select({ id: brokerConnections.id })
+    .from(brokerConnections)
+    .where(and(eq(brokerConnections.id, connectionId), eq(brokerConnections.userId, userId)))
+    .limit(1);
+  if (existing.length === 0) return false;
+  await db
+    .delete(brokerConnections)
+    .where(and(eq(brokerConnections.id, connectionId), eq(brokerConnections.userId, userId)));
+  return true;
+}
+
+/** Server-only: for execution workers. Never expose via tRPC. */
+export async function getDecryptedBrokerCredentials(
+  userId: number,
+  connectionId: number,
+): Promise<{
+  payload: BrokerCredentialPayload;
+  assetClass: BrokerAssetClass;
+  venue: string;
+  environment: "paper" | "live";
+} | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select()
+    .from(brokerConnections)
+    .where(and(eq(brokerConnections.id, connectionId), eq(brokerConnections.userId, userId)))
+    .limit(1);
+  if (rows.length === 0) return null;
+  const row = rows[0];
+  const raw = decryptUtf8Field(row.credentialsEncrypted, brokerCredAad(row.credentialAadKey));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const payload = brokerCredentialPayloadSchema.parse(parsed);
+    return {
+      payload,
+      assetClass: row.assetClass as BrokerAssetClass,
+      venue: row.venue,
+      environment: row.environment,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================

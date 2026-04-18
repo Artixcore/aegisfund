@@ -2,6 +2,7 @@ import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import SparklineChart from "@/components/SparklineChart";
 import { parseGrounding } from "@shared/agentGrounding";
+import { ASSET_CLASS_LABELS, BROKER_ASSET_CLASSES } from "@shared/brokerVenues";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -111,6 +112,7 @@ export default function Dashboard() {
     refetchInterval: 60_000,
   });
   const { data: historyData, isLoading: historyLoading } = trpc.portfolio.getHistory.useQuery({ days: historyDays });
+  const { data: tradingStatus } = trpc.trading.listStatus.useQuery(undefined, { staleTime: 60_000 });
 
   const btc = prices?.BTC;
   const eth = prices?.ETH;
@@ -161,8 +163,36 @@ export default function Dashboard() {
     value: row.totalValueUsd ?? 0,
   }));
 
+  const missingBrokerClasses =
+    tradingStatus && tradingStatus.defaultMode !== "backtest"
+      ? BROKER_ASSET_CLASSES.filter((ac) => !tradingStatus.coverage[ac])
+      : [];
+
   return (
     <div className="p-4 sm:p-6 space-y-6 animate-fade-up">
+      {missingBrokerClasses.length > 0 && (
+        <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-xs">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={14} className="shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+            <div>
+              <p className="font-medium text-foreground">
+                Execution mode is <span className="font-mono">{tradingStatus?.defaultMode}</span> — add broker API keys for:{" "}
+                {missingBrokerClasses.map((ac) => ASSET_CLASS_LABELS[ac]).join(", ")}.
+              </p>
+              <p className="text-muted-foreground mt-1">
+                Paper and live trading require encrypted keys per asset class. Backtest mode uses simulated fills only.
+              </p>
+              <Link
+                href="/settings"
+                className="inline-block mt-2 font-mono text-[11px] text-foreground underline underline-offset-2 hover:text-foreground/80"
+              >
+                Settings → Trading connections
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>

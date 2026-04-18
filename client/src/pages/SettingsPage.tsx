@@ -1,11 +1,18 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import {
+  ASSET_CLASS_LABELS,
+  BROKER_ASSET_CLASSES,
+  BROKER_VENUE_BY_CLASS,
+  type BrokerAssetClass,
+} from "@shared/brokerVenues";
+import {
   Bell,
   Bitcoin,
   ChevronRight,
   Globe,
   Key,
+  Landmark,
   Lock,
   Monitor,
   Save,
@@ -13,20 +20,29 @@ import {
   ShieldCheck,
   Smartphone,
   Sliders,
+  Trash2,
   User,
   Wallet,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
-type SettingsSection = "profile" | "security" | "notifications" | "wallets" | "agents" | "display";
+type SettingsSection =
+  | "profile"
+  | "security"
+  | "notifications"
+  | "wallets"
+  | "trading"
+  | "agents"
+  | "display";
 
 const SECTIONS: { id: SettingsSection; label: string; icon: React.ElementType; description: string }[] = [
   { id: "profile", label: "Profile", icon: User, description: "Manage your identity and account details" },
   { id: "security", label: "Security", icon: Shield, description: "Passwords, sessions, and access control" },
   { id: "notifications", label: "Notifications", icon: Bell, description: "Alerts, price notifications, and agent updates" },
   { id: "wallets", label: "Connected Wallets", icon: Wallet, description: "Manage linked wallet addresses" },
+  { id: "trading", label: "Trading connections", icon: Landmark, description: "Broker API keys and execution mode" },
   { id: "agents", label: "Agent Preferences", icon: Sliders, description: "Configure AI agent behavior and schedules" },
   { id: "display", label: "Display", icon: Monitor, description: "Theme, layout, and interface preferences" },
 ];
@@ -311,6 +327,318 @@ const SETTINGS_CHAIN_META: Record<string, { icon: string; color: string }> = {
   SOL: { icon: "◎", color: "oklch(0.72 0.12 195)" },
 };
 
+function TradingConnectionsSection() {
+  const utils = trpc.useUtils();
+  const { data, isLoading } = trpc.trading.listStatus.useQuery(undefined, { staleTime: 30_000 });
+
+  const [editId, setEditId] = useState<number | null>(null);
+  const [assetClass, setAssetClass] = useState<BrokerAssetClass>("crypto");
+  const [venue, setVenue] = useState<string>("binance");
+  const [environment, setEnvironment] = useState<"paper" | "live">("paper");
+  const [label, setLabel] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [apiSecret, setApiSecret] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [baseUrlOverride, setBaseUrlOverride] = useState("");
+
+  const resetForm = () => {
+    setEditId(null);
+    setLabel("");
+    setApiKey("");
+    setApiSecret("");
+    setPassphrase("");
+    setBaseUrlOverride("");
+  };
+
+  const setModeMut = trpc.trading.setExecutionMode.useMutation({
+    onSuccess: () => {
+      utils.trading.listStatus.invalidate();
+      toast.success("Execution mode saved");
+    },
+    onError: () => toast.error("Could not save execution mode"),
+  });
+  const saveMut = trpc.trading.saveConnection.useMutation({
+    onSuccess: () => {
+      utils.trading.listStatus.invalidate();
+      toast.success("Broker connection saved");
+      resetForm();
+    },
+    onError: (e) => toast.error(e.message ?? "Save failed"),
+  });
+  const deleteMut = trpc.trading.deleteConnection.useMutation({
+    onSuccess: () => {
+      utils.trading.listStatus.invalidate();
+      toast.success("Connection removed");
+    },
+    onError: () => toast.error("Could not remove connection"),
+  });
+
+  useEffect(() => {
+    const venues = BROKER_VENUE_BY_CLASS[assetClass];
+    setVenue((v) => (venues.includes(v) ? v : venues[0] ?? "custom"));
+  }, [assetClass]);
+
+  const startEdit = (id: number) => {
+    const row = data?.connections.find((c) => c.id === id);
+    if (!row) return;
+    setEditId(id);
+    setAssetClass(row.assetClass);
+    setVenue(row.venue);
+    setEnvironment(row.environment);
+    setLabel(row.label ?? "");
+    setApiKey("");
+    setApiSecret("");
+    setPassphrase("");
+    setBaseUrlOverride("");
+  };
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!apiKey.trim()) {
+      toast.error("API key is required");
+      return;
+    }
+    saveMut.mutate({
+      ...(editId != null ? { id: editId } : {}),
+      assetClass,
+      venue,
+      label: label.trim() || undefined,
+      environment,
+      credentials: {
+        apiKey: apiKey.trim(),
+        ...(apiSecret.trim() ? { apiSecret: apiSecret.trim() } : {}),
+        ...(passphrase.trim() ? { passphrase: passphrase.trim() } : {}),
+        ...(baseUrlOverride.trim() ? { baseUrlOverride: baseUrlOverride.trim() } : {}),
+      },
+    });
+  };
+
+  const modes = [
+    {
+      id: "backtest" as const,
+      title: "Backtest",
+      body: "Simulated fills using historical-style logic. No broker keys required.",
+    },
+    {
+      id: "paper" as const,
+      title: "Paper",
+      body: "Use sandbox / paper API endpoints. Store paper API keys below.",
+    },
+    {
+      id: "live" as const,
+      title: "Live",
+      body: "Real accounts and production API keys. Highest risk — use least-privilege keys.",
+    },
+  ];
+
+  return (
+    <div className="space-y-8 max-w-2xl">
+      <div>
+        <h2 className="text-base font-semibold mb-1">Trading connections</h2>
+        <p className="text-xs text-muted-foreground">
+          Add API keys only from brokers or exchanges that allow programmatic access. Keys are encrypted at rest (AES-256-GCM)
+          like other sensitive data. They are never shown again after you save — re-enter to rotate.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        <div className="mono-label">Default execution mode</div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {modes.map((m) => {
+            const active = data?.defaultMode === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setModeMut.mutate({ defaultMode: m.id })}
+                disabled={setModeMut.isPending || isLoading}
+                className={`text-left rounded-lg border px-3 py-2.5 transition-colors ${
+                  active ? "border-foreground/50 bg-accent" : "border-border hover:border-foreground/25"
+                }`}
+              >
+                <div className="text-sm font-medium">{m.title}</div>
+                <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{m.body}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {data && data.defaultMode !== "backtest" && (
+        <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[11px] font-mono text-muted-foreground">
+          <span className="text-foreground/90">Coverage ({data.defaultMode})</span>
+          {": "}
+          {BROKER_ASSET_CLASSES.map((ac) => (
+            <span key={ac} className="inline-flex items-center gap-0.5 mr-2">
+              {ASSET_CLASS_LABELS[ac]} {data.coverage[ac] ? "✓" : "—"}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="mono-label">Saved connections</div>
+        </div>
+        {isLoading ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : !data?.connections.length ? (
+          <p className="text-xs text-muted-foreground">No broker connections yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {data.connections.map((c) => (
+              <div
+                key={c.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-xs"
+              >
+                <div>
+                  <span className="font-medium text-foreground">{ASSET_CLASS_LABELS[c.assetClass as BrokerAssetClass]}</span>
+                  <span className="text-muted-foreground"> · {c.venue} · {c.environment}</span>
+                  {c.keyHintSuffix ? (
+                    <span className="font-mono text-muted-foreground"> · key {c.keyHintSuffix}</span>
+                  ) : null}
+                  {c.label ? <span className="text-muted-foreground"> · {c.label}</span> : null}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => startEdit(c.id)}
+                    className="px-2 py-1 rounded border border-border text-[11px] hover:bg-accent"
+                  >
+                    Replace keys
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm("Remove this broker connection?")) deleteMut.mutate({ id: c.id });
+                    }}
+                    className="p-1.5 rounded border border-border text-muted-foreground hover:text-destructive"
+                    title="Remove"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <form onSubmit={onSubmit} className="space-y-4 aegis-card">
+        <div className="mono-label">{editId != null ? `Update connection #${editId}` : "Add connection"}</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] font-mono text-muted-foreground block mb-1">Asset class</label>
+            <select
+              value={assetClass}
+              onChange={(e) => setAssetClass(e.target.value as BrokerAssetClass)}
+              className="w-full bg-muted border border-border rounded-md px-3 py-2 text-sm"
+            >
+              {BROKER_ASSET_CLASSES.map((ac) => (
+                <option key={ac} value={ac}>
+                  {ASSET_CLASS_LABELS[ac]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] font-mono text-muted-foreground block mb-1">Venue</label>
+            <select
+              value={venue}
+              onChange={(e) => setVenue(e.target.value)}
+              className="w-full bg-muted border border-border rounded-md px-3 py-2 text-sm"
+            >
+              {BROKER_VENUE_BY_CLASS[assetClass].map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] font-mono text-muted-foreground block mb-1">Environment</label>
+            <select
+              value={environment}
+              onChange={(e) => setEnvironment(e.target.value as "paper" | "live")}
+              className="w-full bg-muted border border-border rounded-md px-3 py-2 text-sm"
+            >
+              <option value="paper">Paper / sandbox</option>
+              <option value="live">Live / production</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] font-mono text-muted-foreground block mb-1">Label (optional)</label>
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="My Alpaca paper"
+              className="w-full bg-muted border border-border rounded-md px-3 py-2 text-sm"
+              maxLength={128}
+            />
+          </div>
+        </div>
+        <div>
+          <label className="text-[11px] font-mono text-muted-foreground block mb-1">API key</label>
+          <input
+            type="password"
+            autoComplete="off"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={editId != null ? "Required to replace stored key" : "Required"}
+            className="w-full bg-muted border border-border rounded-md px-3 py-2 text-sm font-mono"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] font-mono text-muted-foreground block mb-1">API secret (optional)</label>
+          <input
+            type="password"
+            autoComplete="off"
+            value={apiSecret}
+            onChange={(e) => setApiSecret(e.target.value)}
+            className="w-full bg-muted border border-border rounded-md px-3 py-2 text-sm font-mono"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] font-mono text-muted-foreground block mb-1">Passphrase (optional, some exchanges)</label>
+          <input
+            type="password"
+            autoComplete="off"
+            value={passphrase}
+            onChange={(e) => setPassphrase(e.target.value)}
+            className="w-full bg-muted border border-border rounded-md px-3 py-2 text-sm font-mono"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] font-mono text-muted-foreground block mb-1">Base URL override (optional)</label>
+          <input
+            value={baseUrlOverride}
+            onChange={(e) => setBaseUrlOverride(e.target.value)}
+            placeholder="https://…"
+            className="w-full bg-muted border border-border rounded-md px-3 py-2 text-sm font-mono"
+          />
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={saveMut.isPending}
+            className="flex items-center gap-2 px-4 py-2 rounded-md bg-foreground text-background text-xs font-medium disabled:opacity-50"
+          >
+            <Save size={12} />
+            {saveMut.isPending ? "Saving…" : "Save connection"}
+          </button>
+          {editId != null && (
+            <button type="button" onClick={resetForm} className="px-4 py-2 rounded-md border border-border text-xs">
+              Cancel edit
+            </button>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function WalletsSection() {
   const [, setLocation] = useLocation();
   const { data: wallets, isLoading } = trpc.wallet.getWallets.useQuery();
@@ -493,6 +821,7 @@ export default function SettingsPage() {
       case "security": return <SecuritySection />;
       case "notifications": return <NotificationsSection />;
       case "wallets": return <WalletsSection />;
+      case "trading": return <TradingConnectionsSection />;
       case "agents": return <AgentsSection />;
       case "display": return <DisplaySection />;
     }

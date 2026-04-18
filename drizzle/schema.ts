@@ -290,3 +290,38 @@ export const userMessagingIdentities = mysqlTable("user_messaging_identities", {
 });
 
 export type UserMessagingIdentity = typeof userMessagingIdentities.$inferSelect;
+
+/**
+ * Encrypted broker API credentials (BYOK). Per-row `credentialAadKey` scopes AES-GCM AAD.
+ */
+export const brokerConnections = mysqlTable("broker_connections", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  assetClass: mysqlEnum("assetClass", ["stock", "forex", "crypto", "commodity"]).notNull(),
+  venue: varchar("venue", { length: 64 }).notNull(),
+  label: varchar("label", { length: 128 }),
+  environment: mysqlEnum("environment", ["paper", "live"]).notNull(),
+  credentialAadKey: varchar("credentialAadKey", { length: 64 }).notNull().unique(),
+  credentialsEncrypted: text("credentialsEncrypted").notNull(),
+  /** Non-secret UX hint, e.g. last 4 of API key (set on save). */
+  keyHintSuffix: varchar("keyHintSuffix", { length: 16 }),
+  isActive: boolean("isActive").default(true).notNull(),
+  lastVerifiedAt: timestamp("lastVerifiedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type BrokerConnection = typeof brokerConnections.$inferSelect;
+export type InsertBrokerConnection = typeof brokerConnections.$inferInsert;
+
+/**
+ * Default execution mode: backtest (sim), paper (sandbox APIs), live (production APIs).
+ */
+export const userExecutionPrefs = mysqlTable("user_execution_prefs", {
+  userId: int("userId").primaryKey(),
+  defaultMode: mysqlEnum("defaultMode", ["backtest", "paper", "live"]).default("backtest").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type UserExecutionPrefs = typeof userExecutionPrefs.$inferSelect;
+export type InsertUserExecutionPrefs = typeof userExecutionPrefs.$inferInsert;

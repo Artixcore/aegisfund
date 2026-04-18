@@ -78,6 +78,13 @@
       "when": 1776540000000,
       "tag": "0010_portfolio_trading_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1776630000000,
+      "tag": "0011_broker_connections",
+      "breakpoints": true
     }
   ]
 }
