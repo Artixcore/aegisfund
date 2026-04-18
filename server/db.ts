@@ -272,6 +272,7 @@ export async function getLatestAgentRuns(userId: number) {
     "futures_commodities",
     "historical_research",
     "executive_briefing",
+    "portfolio_trading",
   ];
 
   const results = [];

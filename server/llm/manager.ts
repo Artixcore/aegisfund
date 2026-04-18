@@ -18,6 +18,7 @@ const AGENT_FEATURE_KEYS: AgentFeatureKey[] = [
   "futures_commodities",
   "historical_research",
   "executive_briefing",
+  "portfolio_trading",
 ];
 
 function isAgentFeatureKey(value: string): value is AgentFeatureKey {

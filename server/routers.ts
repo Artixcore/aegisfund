@@ -527,6 +527,7 @@ const agentRunTypeSchema = z.enum([
   "futures_commodities",
   "historical_research",
   "executive_briefing",
+  "portfolio_trading",
 ]);
 
 const agentsRouter = router({
@@ -560,7 +561,14 @@ const agentsRouter = router({
 
   runAgent: protectedProcedure
     .input(z.object({
-      agentType: z.enum(["market_analysis", "crypto_monitoring", "forex_monitoring", "futures_commodities", "historical_research"]),
+      agentType: z.enum([
+        "market_analysis",
+        "crypto_monitoring",
+        "forex_monitoring",
+        "futures_commodities",
+        "historical_research",
+        "portfolio_trading",
+      ]),
     }))
     .mutation(async ({ ctx, input }) => {
       const prepared = await prepareAgentRun(input.agentType, { userId: ctx.user.id });

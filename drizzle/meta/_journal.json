@@ -71,6 +71,13 @@
       "when": 1776450000000,
       "tag": "0009_kyc_selfie_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1776540000000,
+      "tag": "0010_portfolio_trading_agent",
+      "breakpoints": true
     }
   ]
 }

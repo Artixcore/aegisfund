@@ -3,6 +3,7 @@ import { parseGrounding, stripGrounding, type AgentRunGroundingMeta } from "@sha
 import {
   Activity,
   AlertTriangle,
+  ArrowRightLeft,
   BarChart3,
   BookMarked,
   Bot,
@@ -31,15 +32,17 @@ type AgentType =
   | "forex_monitoring"
   | "futures_commodities"
   | "historical_research"
+  | "portfolio_trading"
   | "executive_briefing";
 
-/** Card and command-strip order (five desks, then synthesizer). */
+/** Card and command-strip order (five desks, portfolio allocator, then synthesizer). */
 const AGENT_CARD_ORDER: AgentType[] = [
   "market_analysis",
   "crypto_monitoring",
   "forex_monitoring",
   "futures_commodities",
   "historical_research",
+  "portfolio_trading",
   "executive_briefing",
 ];
 
@@ -90,6 +93,15 @@ const AGENT_META: Record<AgentType, {
     color: "oklch(0.72 0.12 195)",
     bgColor: "oklch(0.72 0.12 195 / 0.10)",
     mission: "Compiles historical data, identifies market cycle analogs, and produces long-range intelligence.",
+  },
+  portfolio_trading: {
+    label: "Portfolio Trading",
+    description: "Advisory allocation & trade plan (not auto-executed)",
+    icon: ArrowRightLeft,
+    color: "oklch(0.68 0.16 35)",
+    bgColor: "oklch(0.68 0.16 35 / 0.10)",
+    mission:
+      "Reads your grounded portfolio book and market snapshot, then outputs a structured trade plan (target weights, per-chain actions). Aegis does not submit orders — you execute elsewhere if you choose.",
   },
   executive_briefing: {
     label: "Executive Briefing",
@@ -647,7 +659,7 @@ export default function Agents() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">AI Agents</h1>
           <p className="text-xs text-muted-foreground font-mono mt-0.5">
-            Five specialist desks + executive briefing synthesizer · Auto-scheduling
+            Five specialist desks + portfolio trading + executive briefing · Auto-scheduling
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -679,7 +691,7 @@ export default function Agents() {
       </div>
 
       {/* Command overview strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
         {AGENT_CARD_ORDER.map((type) => {
           const meta = AGENT_META[type];
           const run = agentRunMap.get(type);
@@ -738,7 +750,7 @@ export default function Agents() {
       {/* Agent cards grid */}
       {isLoading ? (
         <div className="grid grid-cols-2 gap-5">
-          {[...Array(5)].map((_, i) => (
+          {[...Array(7)].map((_, i) => (
             <div key={i} className="aegis-card h-48 shimmer" />
           ))}
         </div>

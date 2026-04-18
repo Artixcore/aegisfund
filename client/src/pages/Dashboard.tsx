@@ -79,6 +79,7 @@ const AGENT_TYPES = [
   "forex_monitoring",
   "futures_commodities",
   "historical_research",
+  "portfolio_trading",
   "executive_briefing",
 ] as const;
 

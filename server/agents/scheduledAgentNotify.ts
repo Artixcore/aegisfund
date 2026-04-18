@@ -7,6 +7,7 @@ const AGENT_LABELS: Record<string, string> = {
   futures_commodities: "Futures & Commodities",
   historical_research: "Historical Research",
   executive_briefing: "Executive Briefing",
+  portfolio_trading: "Portfolio Trading",
 };
 
 function excerptFromOutput(output: Record<string, unknown>): string {

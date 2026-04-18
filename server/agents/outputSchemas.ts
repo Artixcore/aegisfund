@@ -259,6 +259,62 @@ export function getAgentResponseJsonSchema(agentType: AgentFeatureKey): {
     },
   };
 
+  const portfolioTrading = {
+    name: "portfolio_trading_report",
+    strict,
+    schema: {
+      type: "object",
+      properties: {
+        summary: { type: "string" },
+        portfolio_thesis: { type: "string" },
+        risk_budget_notes: { type: "string" },
+        target_allocation_pct: {
+          type: "object",
+          description: "Optional target weights; omit fields you cannot justify from the snapshot.",
+          properties: {
+            BTC: { type: "number" },
+            ETH: { type: "number" },
+            SOL: { type: "number" },
+            cash_or_stable: { type: "number" },
+          },
+          additionalProperties: true,
+        },
+        recommended_actions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              action: {
+                type: "string",
+                enum: ["hold", "trim", "add", "hedge", "no_change"],
+              },
+              chain: { type: "string", enum: ["BTC", "ETH", "SOL"] },
+              rationale: { type: "string" },
+              urgency: { type: "string", enum: ["low", "medium", "high"] },
+              notional_pct_of_nav: { type: "number" },
+            },
+            required: ["action", "chain", "rationale", "urgency"],
+            additionalProperties: true,
+          },
+        },
+        execution_disclaimer: { type: "string" },
+        confidence_level: { type: "number" },
+        citations: citationsProp,
+        structured_market_report: structuredMarketReportSchema,
+      },
+      required: [
+        "summary",
+        "portfolio_thesis",
+        "risk_budget_notes",
+        "recommended_actions",
+        "execution_disclaimer",
+        "confidence_level",
+        "citations",
+      ],
+      additionalProperties: true,
+    },
+  };
+
   const map: Record<AgentFeatureKey, { name: string; schema: Record<string, unknown>; strict: boolean }> = {
     market_analysis: market,
     crypto_monitoring: crypto,
@@ -266,6 +322,7 @@ export function getAgentResponseJsonSchema(agentType: AgentFeatureKey): {
     futures_commodities: futures,
     historical_research: historical,
     executive_briefing: briefing,
+    portfolio_trading: portfolioTrading,
   };
 
   return map[agentType];

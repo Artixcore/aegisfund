@@ -10,7 +10,7 @@ import {
   getWalletsByUserId,
 } from "../db";
 
-export const DATASET_VERSION = "aegis-features-2026-04-16.6";
+export const DATASET_VERSION = "aegis-features-2026-04-18.1";
 
 export type AgentFeatureKey =
   | "market_analysis"
@@ -18,7 +18,8 @@ export type AgentFeatureKey =
   | "forex_monitoring"
   | "futures_commodities"
   | "historical_research"
-  | "executive_briefing";
+  | "executive_briefing"
+  | "portfolio_trading";
 
 export type FeatureCitation = {
   id: string;
@@ -109,6 +110,8 @@ const AGENT_YAHOO_SPECS: Record<AgentFeatureKey, YahooSpec[]> = {
   historical_research: [...CRYPTO_TRIO, ...MACRO_RISK],
   /** Same benchmark bundle as market desk; desk JSON is supplied separately for synthesis. */
   executive_briefing: [...CRYPTO_TRIO, ...MACRO_RISK],
+  /** Portfolio-aware allocator: crypto + macro benchmarks for risk context. */
+  portfolio_trading: [...CRYPTO_TRIO, ...MACRO_RISK],
 };
 
 /** TradeWatch REST symbols per desk; adjust tickers to match your subscription. */
@@ -149,6 +152,14 @@ const TRADEWATCH_AGENT_SPECS: Record<AgentFeatureKey, TwAgentInstrument[]> = {
   executive_briefing: [
     { category: "crypto", symbol: "BTCUSD", label: "Bitcoin" },
     { category: "crypto", symbol: "ETHUSD", label: "Ethereum" },
+    { category: "currencies", symbol: "EURUSD", label: "EUR/USD" },
+    { category: "indices", symbol: "US500", label: "S&P 500 (proxy)" },
+    { category: "commodities", symbol: "XAUUSD", label: "Gold" },
+  ],
+  portfolio_trading: [
+    { category: "crypto", symbol: "BTCUSD", label: "Bitcoin" },
+    { category: "crypto", symbol: "ETHUSD", label: "Ethereum" },
+    { category: "crypto", symbol: "SOLUSD", label: "Solana" },
     { category: "currencies", symbol: "EURUSD", label: "EUR/USD" },
     { category: "indices", symbol: "US500", label: "S&P 500 (proxy)" },
     { category: "commodities", symbol: "XAUUSD", label: "Gold" },
@@ -456,7 +467,10 @@ export async function buildFeatureSnapshot(
   }
 
   if (
-    (agentType === "market_analysis" || agentType === "historical_research" || agentType === "executive_briefing") &&
+    (agentType === "market_analysis" ||
+      agentType === "historical_research" ||
+      agentType === "executive_briefing" ||
+      agentType === "portfolio_trading") &&
     !prices.SPX &&
     !prices.VIX &&
     !prices.BTC
